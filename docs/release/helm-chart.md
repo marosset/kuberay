@@ -1,4 +1,5 @@
 <!-- markdownlint-disable MD013 -->
+
 # Helm charts release
 
 We host all Helm charts on [kuberay-helm](https://github.com/ray-project/kuberay-helm).
@@ -6,22 +7,25 @@ This document describes the process for release managers to release Helm charts.
 
 ## The end-to-end workflow
 
-### Step 1: Update versions in Chart.yaml and values.yaml files
+### Step 1: Push a version tag
 
-Please update the value of `version` in [ray-cluster/Chart.yaml](https://github.com/ray-project/kuberay/blob/master/helm-chart/ray-cluster/Chart.yaml),
-[kuberay-operator/Chart.yaml](https://github.com/ray-project/kuberay/blob/master/helm-chart/kuberay-operator/Chart.yaml),
-and [kuberay-apiserver/Chart.yaml](https://github.com/ray-project/kuberay/blob/master/helm-chart/kuberay-apiserver/Chart.yaml)
-to the new release version (e.g. 0.4.0).
+Once a tag (e.g., `v1.6.0`, `v1.5.2`, `v1.6.0-rc.0`) is pushed in the kuberay repo, the [sync-helm-charts](https://github.com/ray-project/kuberay/blob/master/.github/workflows/sync-helm-charts.yaml)
+workflow will run. This workflow will automatically bump Helm chart and image versions and open a PR
+in [kuberay-helm](https://github.com/ray-project/kuberay-helm) with those updates, targeting the appropriate branch
+(`main` for new releases, `release-X.Y` for patch releases).
 
-Also make sure `image.tag` has been updated in [kuberay-operator/values.yaml](https://github.com/ray-project/kuberay/blob/master/helm-chart/kuberay-operator/values.yaml) and [kuberay-apiserver/values.yaml](https://github.com/ray-project/kuberay/blob/master/helm-chart/kuberay-apiserver/values.yaml).
+The workflow can also be triggered manually via the Actions UI if needed.
 
-### Step 2: Copy the helm-chart directory from kuberay to kuberay-helm
+### Step 2: Review and merge the PR in kuberay-helm
 
-In [kuberay-helm CI](https://github.com/ray-project/kuberay-helm/blob/main/.github/workflows/chart-release.yaml), `helm/chart-releaser-action` will create releases for all charts in the directory `helm-chart` and update `index.yaml` in the [gh-pages](https://github.com/ray-project/kuberay-helm/tree/gh-pages) branch when the PR is merged into `main`. Note that `index.yaml` is necessary when you run the command `helm repo add`. I recommend removing the `helm-chart` directory in the kuberay-helm repository and creating a new one by copying from the kuberay repository.
+Review the auto-generated PR in [kuberay-helm](https://github.com/ray-project/kuberay-helm/pulls),
+confirm the CI checks pass, and merge it.
 
 ### Step 3: Validate the charts
 
-When the PR is merged into `main`, the releases and `index.yaml` will be generated.
+When the PR is merged into `main`, the [chart-releaser-action](https://github.com/ray-project/kuberay-helm/blob/main/.github/workflows/chart-release.yaml)
+will create releases and update `index.yaml`.
+
 You can validate the charts as follows:
 
 * Confirm that the [releases](https://github.com/ray-project/kuberay-helm/releases) are created as expected.
