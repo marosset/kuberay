@@ -49,6 +49,22 @@ help: ## Display this help.
 
 ##@ Helm
 
+.PHONY: helm-bump-version
+helm-bump-version: ## Bump Helm chart versions. Usage: make helm-bump-version VERSION=1.6.0
+ifndef VERSION
+	$(error VERSION is required. Usage: make helm-bump-version VERSION=1.6.0)
+endif
+	@echo "Bumping Helm chart versions to $(VERSION)..."
+	@for chart in $(KUBERAY_OPERATOR_CHART_PATH) $(KUBERAY_APISERVER_CHART_PATH) $(RAY_CLUSTER_CHART_PATH); do \
+		sed -i 's/^version: .*/version: $(VERSION)/' $$chart/Chart.yaml; \
+		echo "  ✓ $$chart/Chart.yaml → version: $(VERSION)"; \
+	done
+	@for values_file in $(KUBERAY_OPERATOR_CHART_PATH)/values.yaml $(KUBERAY_APISERVER_CHART_PATH)/values.yaml; do \
+		sed -i 's/^\(\s*\)tag: .*/\1tag: v$(VERSION)/' $$values_file; \
+		echo "  ✓ $$values_file → image.tag: v$(VERSION)"; \
+	done
+	@echo "Done. Please review changes and commit."
+
 .PHONY: helm-unittest
 helm-unittest: helm-unittest-plugin ## Run Helm chart unittests.
 	$(HELM) unittest $(KUBERAY_OPERATOR_CHART_PATH) --file "tests/**/*_test.yaml" --strict --debug
