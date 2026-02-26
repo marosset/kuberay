@@ -1,0 +1,158 @@
+# This workflow syncs Helm chart updates from the kuberay repo to the kuberay-helm
+# repo by opening a pull request to facilitate release management.
+#
+# Authentication:
+#   This workflow requires a PAT stored as the repository secret KUBERAY_HELM_GH_PAT.
+#
+#   To create the PAT:
+#     1. Go to https://github.com/settings/tokens?type=beta
+#     2. Create a fine-grained token scoped to the target kuberay-helm repository
+#        (e.g. ray-project/kuberay-helm) with the following permissions:
+#          - Contents: Read and write (to push branches)
+#          - Pull requests: Read and write (to open PRs)
+#     3. Add the token as a repository secret named KUBERAY_HELM_GH_PAT in the
+#        kuberay repo under Settings → Secrets and variables → Actions.
+
+name: Sync Helm Charts to kuberay-helm
+
+on:
+  # Note: This pattern is set to only trigger the workflow matching `vX.Y.Z`
+  # and NOT ray-operator specific release tags (`ray-operator-vX.Y.Z`).
+  # push:
+  #   tags:
+  #     - 'v[0-9]+.[0-9]+.[0-9]+*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 1.6.0 or 1.6.0-rc.0). Do not include the "v" prefix.'
+        required: true
+        type: string
+      target-branch:
+        description: 'Target branch in kuberay-helm (leave empty to auto-detect from version).'
+        required: false
+        type: string
+        default: ''
+      target-repo:
+        description: 'Target kuberay-helm repository (e.g. myuser/kuberay-helm for testing).'
+        required: false
+        type: string
+        default: 'ray-project/kuberay-helm'
+
+env:
+  TARGET_REPO: ${{ inputs.target-repo || 'ray-project/kuberay-helm' }}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout kuberay
+        uses: actions/checkout@v4
+
+      - name: Determine version and target branch
+        id: config
+        run: |
+          # Determine the chart version.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            # Extract version from tag, stripping the leading "v".
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          # Determine the target branch in kuberay-helm.
+          if [ -n "${{ inputs.target-branch }}" ]; then
+            # Manual override.
+            TARGET_BRANCH="${{ inputs.target-branch }}"
+          else
+            # Auto-detect from version.
+            # Extract major.minor from the version (e.g. 1.6.0-rc.0 → 1.6).
+            MAJOR_MINOR=$(echo "$VERSION" | grep -oP '^\d+\.\d+')
+            PATCH=$(echo "$VERSION" | grep -oP '^\d+\.\d+\.\K\d+')
+
+            if [ "$PATCH" -gt 0 ] 2>/dev/null; then
+              # Patch release → target release-X.Y branch.
+              TARGET_BRANCH="release-${MAJOR_MINOR}"
+            else
+              # Major/minor release (or RC of a .0 release) → target main.
+              TARGET_BRANCH="main"
+            fi
+          fi
+          echo "target_branch=$TARGET_BRANCH" >> "$GITHUB_OUTPUT"
+
+          echo "📦 Version: $VERSION"
+          echo "🎯 Target branch: $TARGET_BRANCH"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ray-operator/go.mod
+
+      - name: Bump Helm chart versions
+        working-directory: helm-chart
+        run: make helm-bump-version VERSION=${{ steps.config.outputs.version }}
+
+      - name: Checkout kuberay-helm
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TARGET_REPO }}
+          ref: ${{ steps.config.outputs.target_branch }}
+          token: ${{ secrets.KUBERAY_HELM_GH_PAT }}
+          path: kuberay-helm
+
+      - name: Sync helm-chart directory
+        run: |
+          rm -rf kuberay-helm/helm-chart/
+          cp -r helm-chart/ kuberay-helm/helm-chart/
+
+      - name: Create Pull Request in kuberay-helm
+        env:
+          GH_TOKEN: ${{ secrets.KUBERAY_HELM_GH_PAT }}
+          VERSION: ${{ steps.config.outputs.version }}
+          TARGET_BRANCH: ${{ steps.config.outputs.target_branch }}
+        run: |
+          cd kuberay-helm
+
+          BRANCH="sync/helm-charts-${VERSION}"
+
+          # Configure git for the commit.
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Create a new branch. If it already exists from a previous run, reset it.
+          git checkout -B "$BRANCH"
+
+          # Stage and commit changes.
+          git add helm-chart/
+          git commit -m "Sync helm charts version ${VERSION} from kuberay"
+
+          # Push the branch (force push in case of a re-run).
+          git push --force origin "$BRANCH"
+
+          # Build the PR body.
+          PR_BODY=$(cat <<EOF
+          Automated sync from [${{ github.repository }}](https://github.com/${{ github.repository }}).
+
+          **Chart version:** \`${VERSION}\`
+          **Source ref:** \`${{ github.ref_name }}\`
+          **Source commit:** \`${{ github.sha }}\`
+          **Target branch:** \`${TARGET_BRANCH}\`
+
+          This PR replaces the \`helm-chart/\` directory with the contents from the kuberay repo
+          after running \`make helm-bump-version VERSION=${VERSION}\`.
+          EOF
+          )
+
+          # Create the PR if one doesn't already exist for this branch.
+          EXISTING_PR=$(gh pr list --repo "${{ env.TARGET_REPO }}" --head "$BRANCH" --base "$TARGET_BRANCH" --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING_PR" ]; then
+            echo "✅ PR #${EXISTING_PR} already exists, updated branch with force push."
+          else
+            gh pr create \
+              --repo "${{ env.TARGET_REPO }}" \
+              --base "$TARGET_BRANCH" \
+              --head "$BRANCH" \
+              --title "Release Helm charts ${VERSION}" \
+              --body "$PR_BODY"
+            echo "✅ PR created."
+          fi
