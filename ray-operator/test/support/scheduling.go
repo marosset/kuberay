@@ -13,11 +13,49 @@ import (
 // (Kubernetes 1.37), but KubeRay still supports the functionality on 1.36
 // clusters, so the types are vendored locally. Because they are no longer part
 // of the typed client-go clientset, these helpers access them via the dynamic
-// client and convert the results into the vendored types.
+// client and convert the results into the vendored types. The generic
+// getSchedulingObject/listSchedulingObjects helpers are version-parameterized so
+// v1beta1/v1alpha3 e2e tests can reuse them with their own GVR and types.
 var (
-	workloadGVR = schema.GroupVersionResource{Group: schedulingv1alpha2.GroupName, Version: "v1alpha2", Resource: "workloads"}
-	podGroupGVR = schema.GroupVersionResource{Group: schedulingv1alpha2.GroupName, Version: "v1alpha2", Resource: "podgroups"}
+	workloadGVR = SchedulingGVR("v1alpha2", "workloads")
+	podGroupGVR = SchedulingGVR("v1alpha2", "podgroups")
 )
+
+// SchedulingGVR builds a GroupVersionResource in the scheduling.k8s.io group for
+// the given API version and resource (e.g. "v1beta1", "workloads").
+func SchedulingGVR(version, resource string) schema.GroupVersionResource {
+	return schema.GroupVersionResource{Group: schedulingv1alpha2.GroupName, Version: version, Resource: resource}
+}
+
+// getSchedulingObject fetches a namespaced scheduling.k8s.io object via the
+// dynamic client and converts it into the typed T (any API version).
+func getSchedulingObject[T any](t Test, gvr schema.GroupVersionResource, namespace, name string) (*T, error) {
+	u, err := t.Client().Dynamic().Resource(gvr).Namespace(namespace).Get(t.Ctx(), name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	obj := new(T)
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, obj); err != nil {
+		return nil, err
+	}
+	return obj, nil
+}
+
+// listSchedulingObjects lists namespaced scheduling.k8s.io objects via the
+// dynamic client and converts them into typed Ts (any API version).
+func listSchedulingObjects[T any](t Test, gvr schema.GroupVersionResource, namespace string) ([]T, error) {
+	list, err := t.Client().Dynamic().Resource(gvr).Namespace(namespace).List(t.Ctx(), metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]T, len(list.Items))
+	for i := range list.Items {
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(list.Items[i].Object, &items[i]); err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
+}
 
 func Workload(t Test, namespace, name string) func() (*schedulingv1alpha2.Workload, error) {
 	return func() (*schedulingv1alpha2.Workload, error) {
@@ -26,15 +64,7 @@ func Workload(t Test, namespace, name string) func() (*schedulingv1alpha2.Worklo
 }
 
 func GetWorkload(t Test, namespace, name string) (*schedulingv1alpha2.Workload, error) {
-	u, err := t.Client().Dynamic().Resource(workloadGVR).Namespace(namespace).Get(t.Ctx(), name, metav1.GetOptions{})
-	if err != nil {
-		return nil, err
-	}
-	workload := &schedulingv1alpha2.Workload{}
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, workload); err != nil {
-		return nil, err
-	}
-	return workload, nil
+	return getSchedulingObject[schedulingv1alpha2.Workload](t, workloadGVR, namespace, name)
 }
 
 func PodGroup(t Test, namespace, name string) func() (*schedulingv1alpha2.PodGroup, error) {
@@ -44,37 +74,21 @@ func PodGroup(t Test, namespace, name string) func() (*schedulingv1alpha2.PodGro
 }
 
 func GetPodGroup(t Test, namespace, name string) (*schedulingv1alpha2.PodGroup, error) {
-	u, err := t.Client().Dynamic().Resource(podGroupGVR).Namespace(namespace).Get(t.Ctx(), name, metav1.GetOptions{})
-	if err != nil {
-		return nil, err
-	}
-	podGroup := &schedulingv1alpha2.PodGroup{}
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, podGroup); err != nil {
-		return nil, err
-	}
-	return podGroup, nil
+	return getSchedulingObject[schedulingv1alpha2.PodGroup](t, podGroupGVR, namespace, name)
 }
 
 func Workloads(t Test, namespace string) func(g gomega.Gomega) []schedulingv1alpha2.Workload {
 	return func(g gomega.Gomega) []schedulingv1alpha2.Workload {
-		list, err := t.Client().Dynamic().Resource(workloadGVR).Namespace(namespace).List(t.Ctx(), metav1.ListOptions{})
+		workloads, err := listSchedulingObjects[schedulingv1alpha2.Workload](t, workloadGVR, namespace)
 		g.Expect(err).NotTo(gomega.HaveOccurred())
-		workloads := make([]schedulingv1alpha2.Workload, len(list.Items))
-		for i := range list.Items {
-			g.Expect(runtime.DefaultUnstructuredConverter.FromUnstructured(list.Items[i].Object, &workloads[i])).To(gomega.Succeed())
-		}
 		return workloads
 	}
 }
 
 func PodGroups(t Test, namespace string) func(g gomega.Gomega) []schedulingv1alpha2.PodGroup {
 	return func(g gomega.Gomega) []schedulingv1alpha2.PodGroup {
-		list, err := t.Client().Dynamic().Resource(podGroupGVR).Namespace(namespace).List(t.Ctx(), metav1.ListOptions{})
+		podGroups, err := listSchedulingObjects[schedulingv1alpha2.PodGroup](t, podGroupGVR, namespace)
 		g.Expect(err).NotTo(gomega.HaveOccurred())
-		podGroups := make([]schedulingv1alpha2.PodGroup, len(list.Items))
-		for i := range list.Items {
-			g.Expect(runtime.DefaultUnstructuredConverter.FromUnstructured(list.Items[i].Object, &podGroups[i])).To(gomega.Succeed())
-		}
 		return podGroups
 	}
 }
