@@ -29,4 +29,6 @@ nodes:
         feature-gates: "GenericWorkload=true"
     scheduler:
       extraArgs:
-        feature-gates: "GenericWorkload=true,GangScheduling=true"
+        # GenericWorkload enables the scheduler's PodGroup/gang logic. There is no
+        # separate "GangScheduling" gate in 1.37.
+        feature-gates: "GenericWorkload=true"

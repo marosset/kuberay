@@ -2,6 +2,7 @@ package support
 
 import (
 	"github.com/onsi/gomega"
+	schedulingv1beta1 "k8s.io/api/scheduling/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -88,6 +89,49 @@ func Workloads(t Test, namespace string) func(g gomega.Gomega) []schedulingv1alp
 func PodGroups(t Test, namespace string) func(g gomega.Gomega) []schedulingv1alpha2.PodGroup {
 	return func(g gomega.Gomega) []schedulingv1alpha2.PodGroup {
 		podGroups, err := listSchedulingObjects[schedulingv1alpha2.PodGroup](t, podGroupGVR, namespace)
+		g.Expect(err).NotTo(gomega.HaveOccurred())
+		return podGroups
+	}
+}
+
+// scheduling.k8s.io/v1beta1 accessors (Kubernetes 1.37+). These come from
+// k8s.io/api directly, so they use the same generic dynamic-client helpers.
+var (
+	workloadV1Beta1GVR = SchedulingGVR("v1beta1", "workloads")
+	podGroupV1Beta1GVR = SchedulingGVR("v1beta1", "podgroups")
+)
+
+func WorkloadV1Beta1(t Test, namespace, name string) func() (*schedulingv1beta1.Workload, error) {
+	return func() (*schedulingv1beta1.Workload, error) {
+		return GetWorkloadV1Beta1(t, namespace, name)
+	}
+}
+
+func GetWorkloadV1Beta1(t Test, namespace, name string) (*schedulingv1beta1.Workload, error) {
+	return getSchedulingObject[schedulingv1beta1.Workload](t, workloadV1Beta1GVR, namespace, name)
+}
+
+func PodGroupV1Beta1(t Test, namespace, name string) func() (*schedulingv1beta1.PodGroup, error) {
+	return func() (*schedulingv1beta1.PodGroup, error) {
+		return GetPodGroupV1Beta1(t, namespace, name)
+	}
+}
+
+func GetPodGroupV1Beta1(t Test, namespace, name string) (*schedulingv1beta1.PodGroup, error) {
+	return getSchedulingObject[schedulingv1beta1.PodGroup](t, podGroupV1Beta1GVR, namespace, name)
+}
+
+func WorkloadsV1Beta1(t Test, namespace string) func(g gomega.Gomega) []schedulingv1beta1.Workload {
+	return func(g gomega.Gomega) []schedulingv1beta1.Workload {
+		workloads, err := listSchedulingObjects[schedulingv1beta1.Workload](t, workloadV1Beta1GVR, namespace)
+		g.Expect(err).NotTo(gomega.HaveOccurred())
+		return workloads
+	}
+}
+
+func PodGroupsV1Beta1(t Test, namespace string) func(g gomega.Gomega) []schedulingv1beta1.PodGroup {
+	return func(g gomega.Gomega) []schedulingv1beta1.PodGroup {
+		podGroups, err := listSchedulingObjects[schedulingv1beta1.PodGroup](t, podGroupV1Beta1GVR, namespace)
 		g.Expect(err).NotTo(gomega.HaveOccurred())
 		return podGroups
 	}

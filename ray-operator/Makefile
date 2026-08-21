@@ -110,21 +110,24 @@ test-e2e-rayjob: manifests fmt vet ## Run e2e RayJob tests.
 
 test-e2e-kubernetes-was-v1alpha2: WHAT ?= ./test/e2ekuberneteswas
 test-e2e-kubernetes-was-v1alpha2: manifests fmt vet ## Run e2e Kubernetes WAS v1alpha2 tests.
-	go test -timeout 30m -v $(WHAT)
+	go test -timeout 30m -v -run 'TestKubernetesWAS_' $(WHAT)
 
 test-e2e-kubernetes-was-v1beta1: WHAT ?= ./test/e2ekuberneteswas
 test-e2e-kubernetes-was-v1beta1: manifests fmt vet ## Run e2e Kubernetes WAS v1beta1 tests (requires K8s 1.37+).
-	go test -timeout 30m -v $(WHAT)
+	go test -timeout 30m -v -run 'TestKubernetesWASV1Beta1_' $(WHAT)
 
 test-e2e-kubernetes-was-v1alpha3: WHAT ?= ./test/e2ekuberneteswas
 test-e2e-kubernetes-was-v1alpha3: manifests fmt vet ## Run e2e Kubernetes WAS v1alpha3 tests (requires K8s 1.37+).
-	go test -timeout 30m -v $(WHAT)
+	go test -timeout 30m -v -run 'TestKubernetesWASV1Alpha3_' $(WHAT)
 
 # Kubernetes 1.37 has no published kindest/node image yet, so build one locally
 # from the kubernetes source at the given tag. Override WAS_K8S_VERSION at GA.
 WAS_K8S_VERSION ?= v1.37.0-rc.0
 WAS_KIND_NODE_IMAGE ?= kindest/node:$(WAS_K8S_VERSION)
-WAS_K8S_SRC ?= $(LOCALBIN)/kubernetes-src
+# Clone the Kubernetes source OUTSIDE the ray-operator Go module (repo-root bin/,
+# ignored by **/bin/) so controller-gen's `paths=./...` scan and go build/vet/test
+# never descend into it.
+WAS_K8S_SRC ?= $(CURDIR)/../bin/kubernetes-src
 
 .PHONY: kind-node-image
 kind-node-image: $(LOCALBIN) ## Build a Kind node image for Kubernetes 1.37 ($(WAS_KIND_NODE_IMAGE)); needed until a published kindest/node exists. Override WAS_K8S_VERSION.

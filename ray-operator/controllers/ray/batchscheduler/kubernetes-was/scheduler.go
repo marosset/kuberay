@@ -16,10 +16,13 @@ import (
 	schedulerinterface "github.com/ray-project/kuberay/ray-operator/controllers/ray/batchscheduler/interface"
 )
 
-const pluginName = "kubernetes-was-v1alpha2"
+// PluginName is the version-agnostic umbrella identity for the Kubernetes WAS
+// batch scheduler. Each per-version provider reports its own
+// "kubernetes-was-<version>" identity from BatchScheduler.Name().
+const PluginName = "kubernetes-was"
 
-// GetPluginName returns the batch scheduler plugin name for Kubernetes WAS.
-func GetPluginName() string { return pluginName }
+// GetPluginName returns the version-agnostic umbrella name for Kubernetes WAS.
+func GetPluginName() string { return PluginName }
 
 // Provider is a versioned implementation of Kubernetes workload-aware scheduling.
 // Each provider targets one scheduling.k8s.io API version and is registered via

@@ -17,7 +17,7 @@ import (
 // TODO: honor a deploy-time preferred API version.
 func selectProvider(config *rest.Config) (Provider, error) {
 	if len(registeredProviders) == 0 {
-		return nil, fmt.Errorf("no %s providers registered", pluginName)
+		return nil, fmt.Errorf("no %s providers registered", PluginName)
 	}
 
 	providers := slices.Clone(registeredProviders)
@@ -38,5 +38,5 @@ func selectProvider(config *rest.Config) (Provider, error) {
 		}
 		return provider, nil
 	}
-	return nil, fmt.Errorf("no served scheduling.k8s.io API version available for %s: %w", pluginName, errors.Join(unavailable...))
+	return nil, fmt.Errorf("no served scheduling.k8s.io API version available for %s: %w", PluginName, errors.Join(unavailable...))
 }

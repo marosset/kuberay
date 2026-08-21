@@ -38,6 +38,12 @@ const (
 	skipReasonAutoscaling            = "autoscaling is not yet supported"
 )
 
+// schedulerName is this provider's explicit per-version plugin identity
+// ("<umbrella>-v1alpha2"), surfaced in logs/events/status. WAS child pods use
+// corev1.DefaultSchedulerName, so this is an observability identity rather than a
+// pod schedulerName.
+const schedulerName = kuberneteswas.PluginName + "-v1alpha2"
+
 type KubernetesWASV1Alpha2Scheduler struct {
 	cli client.Client
 }
@@ -49,7 +55,7 @@ func init() {
 	kuberneteswas.RegisterProvider(&Provider{})
 }
 
-func (k *KubernetesWASV1Alpha2Scheduler) Name() string { return kuberneteswas.GetPluginName() }
+func (k *KubernetesWASV1Alpha2Scheduler) Name() string { return schedulerName }
 
 func (k *KubernetesWASV1Alpha2Scheduler) DoBatchSchedulingOnSubmission(ctx context.Context, object metav1.Object) error {
 	rayCluster, ok := object.(*rayv1.RayCluster)
@@ -58,7 +64,7 @@ func (k *KubernetesWASV1Alpha2Scheduler) DoBatchSchedulingOnSubmission(ctx conte
 	}
 
 	if reason := schedulingSkipReason(rayCluster); reason != "" {
-		ctrl.LoggerFrom(ctx).WithName(kuberneteswas.GetPluginName()).Info("Skipping Kubernetes workload-aware scheduling", "reason", reason)
+		ctrl.LoggerFrom(ctx).WithName(schedulerName).Info("Skipping Kubernetes workload-aware scheduling", "reason", reason)
 		_, err := k.CleanupOnCompletion(ctx, rayCluster)
 		return err
 	}
