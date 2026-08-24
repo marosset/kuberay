@@ -51,14 +51,14 @@ func setProviderUnavailable(t *testing.T, provider *fakeProvider) {
 func TestSelectProviderNoneRegistered(t *testing.T) {
 	withProviders(t)
 
-	_, err := selectProvider(&rest.Config{})
+	_, err := selectProvider(&rest.Config{}, "")
 	require.Error(t, err)
 }
 
 func TestSelectProviderNilConfigReturnsPreferredVersion(t *testing.T) {
 	withProviders(t, v1alpha2Provider, v1alpha3Provider)
 
-	got, err := selectProvider(nil)
+	got, err := selectProvider(nil, "")
 	require.NoError(t, err)
 	require.Same(t, v1alpha3Provider, got)
 }
@@ -67,7 +67,7 @@ func TestSelectProviderUsesKubeAwareVersionOrder(t *testing.T) {
 	withProviders(t, v1alpha2Provider, v1Provider, v1alpha3Provider, v1beta1Provider)
 
 	for _, expected := range []*fakeProvider{v1Provider, v1beta1Provider, v1alpha3Provider, v1alpha2Provider} {
-		got, err := selectProvider(&rest.Config{})
+		got, err := selectProvider(&rest.Config{}, "")
 		require.NoError(t, err)
 		require.Same(t, expected, got)
 		setProviderUnavailable(t, expected)
@@ -78,7 +78,7 @@ func TestSelectProviderPreservesRegistrationOrderForEqualVersions(t *testing.T) 
 	second := *v1alpha2Provider
 	withProviders(t, v1alpha2Provider, &second)
 
-	got, err := selectProvider(&rest.Config{})
+	got, err := selectProvider(&rest.Config{}, "")
 	require.NoError(t, err)
 	require.Same(t, v1alpha2Provider, got)
 }
@@ -87,6 +87,40 @@ func TestSelectProviderAllUnavailable(t *testing.T) {
 	withProviders(t, v1alpha2Provider)
 	setProviderUnavailable(t, v1alpha2Provider)
 
-	_, err := selectProvider(&rest.Config{})
+	_, err := selectProvider(&rest.Config{}, "")
 	require.Error(t, err)
+}
+
+func TestSelectProviderPinnedVersionServed(t *testing.T) {
+	withProviders(t, v1alpha2Provider, v1alpha3Provider, v1beta1Provider)
+
+	// v1beta1 is the most mature, but pin v1alpha3 explicitly.
+	got, err := selectProvider(&rest.Config{}, "v1alpha3")
+	require.NoError(t, err)
+	require.Same(t, v1alpha3Provider, got)
+}
+
+func TestSelectProviderPinnedVersionNotServed(t *testing.T) {
+	withProviders(t, v1alpha2Provider, v1alpha3Provider, v1beta1Provider)
+	setProviderUnavailable(t, v1alpha3Provider)
+
+	_, err := selectProvider(&rest.Config{}, "v1alpha3")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not served")
+}
+
+func TestSelectProviderPinnedVersionNotRegistered(t *testing.T) {
+	withProviders(t, v1alpha2Provider, v1beta1Provider)
+
+	_, err := selectProvider(&rest.Config{}, "v1alpha3")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no kubernetes-was provider registered for pinned target version")
+}
+
+func TestSelectProviderPinnedVersionNilConfigSkipsDiscovery(t *testing.T) {
+	withProviders(t, v1alpha2Provider, v1beta1Provider)
+
+	got, err := selectProvider(nil, "v1alpha2")
+	require.NoError(t, err)
+	require.Same(t, v1alpha2Provider, got)
 }

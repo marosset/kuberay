@@ -167,6 +167,7 @@ spec:
 | logging.sizeLimit | string | `""` | EmptyDir volume size limit for kuberay-operator log file. |
 | batchScheduler.enabled | bool | `false` |  |
 | batchScheduler.name | string | `""` |  |
+| kubernetesWAS.targetVersion | string | `""` | Pin the scheduling.k8s.io API version workload-aware scheduling uses (e.g. "v1beta1", "v1alpha3"). Empty selects the most mature version the cluster serves. Only used when the KubernetesWAS feature gate is enabled. |
 | configuration.enabled | bool | `false` | Whether to enable the configuration feature. If enabled, a ConfigMap will be created and mounted to the operator. When enabled, flag-based configuration values (leaderElectionEnabled, metrics.enabled, kubeClient.qps, etc.) will be injected into the ConfigMap. The operator will use the ConfigMap and ignore command-line flags. |
 | configuration.defaultContainerEnvs | list | `[]` | Default environment variables to inject into all Ray containers in all RayCluster CRs. This allows user to set feature flags across all Ray pods. Example: defaultContainerEnvs: - name: RAY_enable_open_telemetry   value: "true" - name: RAY_metric_cardinality_level   value: "recommended" |
 | configuration.defaultPodAnnotations | object | `{}` | Default annotations to add to all Ray pod templates. User-specified annotations take precedence. Example: defaultPodAnnotations:   prometheus.io/scrape: "true"   prometheus.io/port: "8080" |

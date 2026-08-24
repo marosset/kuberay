@@ -52,6 +52,11 @@ type Configuration struct {
 	// based on the given name, currently, supported values are volcano, yunikorn, kai-scheduler.
 	BatchScheduler string `json:"batchScheduler,omitempty"`
 
+	// KubernetesWASTargetVersion optionally pins the scheduling.k8s.io API version used by the
+	// Kubernetes workload-aware scheduler (e.g. "v1beta1", "v1alpha3"). Empty selects the most
+	// mature version the cluster serves. Only used when the KubernetesWAS feature gate is enabled.
+	KubernetesWASTargetVersion string `json:"kubernetesWASTargetVersion,omitempty"`
+
 	// MetricsAddr is the address the metrics endpoint binds to.
 	MetricsAddr string `json:"metricsAddr,omitempty"`
 

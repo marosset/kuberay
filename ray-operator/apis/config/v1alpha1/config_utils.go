@@ -22,6 +22,11 @@ func ValidateBatchSchedulerConfig(logger logr.Logger, config Configuration) erro
 		return nil
 	}
 
+	// KubernetesWASTargetVersion only applies when the WAS scheduler (KubernetesWAS gate) is selected.
+	if len(config.KubernetesWASTargetVersion) > 0 {
+		return fmt.Errorf("kubernetes-was-target-version is only valid with the KubernetesWAS feature gate")
+	}
+
 	if config.EnableBatchScheduler && len(config.BatchScheduler) > 0 {
 		return fmt.Errorf("both feature flags enable-batch-scheduler (deprecated) and batch-scheduler are set. Please use batch-scheduler only")
 	}

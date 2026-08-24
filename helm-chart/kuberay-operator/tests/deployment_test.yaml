@@ -315,6 +315,37 @@ tests:
           path: spec.template.spec.containers[?(@.name=="kuberay-operator")].args
           content: "--feature-gates=KubernetesWAS=true"
 
+  - it: Should pin the Kubernetes WAS target version when kubernetesWAS.targetVersion is set
+    set:
+      featureGates:
+        - name: KubernetesWAS
+          enabled: true
+      kubernetesWAS:
+        targetVersion: v1alpha3
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name=="kuberay-operator")].args
+          content: "--kubernetes-was-target-version=v1alpha3"
+
+  - it: Should fail when kubernetesWAS.targetVersion is set without the KubernetesWAS feature gate
+    set:
+      kubernetesWAS:
+        targetVersion: v1alpha3
+    asserts:
+      - failedTemplate:
+          errorMessage: kubernetesWAS.targetVersion requires the KubernetesWAS feature gate to be enabled in featureGates
+
+  - it: Should fail when kubernetesWAS.targetVersion is not a supported version
+    set:
+      featureGates:
+        - name: KubernetesWAS
+          enabled: true
+      kubernetesWAS:
+        targetVersion: v1beta2
+    asserts:
+      - failedTemplate:
+          errorMessage: 'kubernetesWAS.targetVersion must be one of v1alpha2, v1beta1, v1alpha3, got "v1beta2"'
+
   - it: Should add config volume and volumeMount when configuration is enabled
     set:
       configuration:

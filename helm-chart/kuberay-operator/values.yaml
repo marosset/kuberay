@@ -101,6 +101,13 @@ batchScheduler:
   # "batchScheduler.enabled=true" at the same time as it will override this option.
   name: ""
 
+# Configuration for Kubernetes workload-aware scheduling (WAS). Only takes effect when the
+# KubernetesWAS feature gate is enabled in `featureGates` below.
+kubernetesWAS:
+  # -- Pin the scheduling.k8s.io API version WAS uses (e.g. "v1beta1", "v1alpha3").
+  # Empty selects the most mature version the cluster serves.
+  targetVersion: ""
+
 # Configuration for the KubeRay operator.
 configuration:
   # -- Whether to enable the configuration feature. If enabled, a ConfigMap will be created and mounted to the operator.

@@ -56,6 +56,9 @@ data:
     batchScheduler: {{ .Values.batchScheduler.name | quote }}
     {{- end }}
     {{- end }}
+    {{- if and .Values.kubernetesWAS .Values.kubernetesWAS.targetVersion }}
+    kubernetesWASTargetVersion: {{ .Values.kubernetesWAS.targetVersion | quote }}
+    {{- end }}
     {{- if .Values.configuration.headSidecarContainers }}
     headSidecarContainers:
     {{- toYaml .Values.configuration.headSidecarContainers | nindent 4 }}

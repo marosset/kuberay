@@ -81,6 +81,21 @@ true
 {{- end -}}
 {{- end }}
 
+{{/*
+Validate the Kubernetes WAS target-version override.
+*/}}
+{{- define "kuberay-operator.validateKubernetesWAS" -}}
+{{- if and .Values.kubernetesWAS .Values.kubernetesWAS.targetVersion }}
+{{- $v := .Values.kubernetesWAS.targetVersion }}
+{{- if not (include "kuberay.kubernetesWASEnabled" .) }}
+{{- fail "kubernetesWAS.targetVersion requires the KubernetesWAS feature gate to be enabled in featureGates" }}
+{{- end }}
+{{- if not (has $v (list "v1alpha2" "v1beta1" "v1alpha3")) }}
+{{- fail (printf "kubernetesWAS.targetVersion must be one of v1alpha2, v1beta1, v1alpha3, got %q" $v) }}
+{{- end }}
+{{- end }}
+{{- end }}
+
 {{- /* Create the name of the service to use. */ -}}
 {{- define "kuberay-operator.service.name" -}}
 {{- include "kuberay-operator.fullname" . }}

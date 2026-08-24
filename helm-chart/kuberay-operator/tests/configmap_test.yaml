@@ -236,6 +236,20 @@ tests:
           path: data["config.yaml"]
           pattern: 'batchScheduler: "volcano"'
 
+  - it: Should include kubernetesWASTargetVersion when set
+    set:
+      configuration:
+        enabled: true
+      featureGates:
+        - name: KubernetesWAS
+          enabled: true
+      kubernetesWAS:
+        targetVersion: v1alpha3
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'kubernetesWASTargetVersion: "v1alpha3"'
+
   - it: Should include logging configuration
     set:
       configuration:

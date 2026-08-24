@@ -57,7 +57,7 @@ func getSchedulerFactory(rayConfigs configapi.Configuration) (schedulerinterface
 	// The KubernetesWAS feature gate selects the Kubernetes WAS scheduler; ValidateBatchSchedulerConfig
 	// enforces that it is not combined with --batch-scheduler or --enable-batch-scheduler.
 	if features.Enabled(features.KubernetesWAS) {
-		return &kuberneteswas.SchedulerFactory{}, nil
+		return &kuberneteswas.SchedulerFactory{TargetVersion: rayConfigs.KubernetesWASTargetVersion}, nil
 	}
 
 	var factory schedulerinterface.BatchSchedulerFactory

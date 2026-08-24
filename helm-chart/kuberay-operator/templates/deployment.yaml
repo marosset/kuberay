@@ -85,6 +85,7 @@ spec:
             - {{ .Values.operatorCommand }}
           args:
             {{- $argList := list -}}
+            {{- include "kuberay-operator.validateKubernetesWAS" . -}}
             {{- if .Values.configuration.enabled -}}
             {{- $argList = append $argList "--config" -}}
             {{- $argList = append $argList "/etc/kuberay/config.yaml" -}}
@@ -97,6 +98,9 @@ spec:
             {{- if .Values.batchScheduler.name -}}
             {{- $argList = append $argList (printf "--batch-scheduler=%s" .Values.batchScheduler.name) -}}
             {{- end -}}
+            {{- end -}}
+            {{- if and .Values.kubernetesWAS .Values.kubernetesWAS.targetVersion -}}
+            {{- $argList = append $argList (printf "--kubernetes-was-target-version=%s" .Values.kubernetesWAS.targetVersion) -}}
             {{- end -}}
             {{- $watchNamespace := "" -}}
             {{- if and .Values.singleNamespaceInstall (not .Values.watchNamespace) -}}

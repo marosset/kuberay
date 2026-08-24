@@ -72,6 +72,7 @@ func main() {
 	var featureGates string
 	var enableBatchScheduler bool
 	var batchScheduler string
+	var kubernetesWASTargetVersion string
 	var enableMetrics bool
 	var qps float64
 	var burst int
@@ -101,6 +102,8 @@ func main() {
 		"(Deprecated) Enable batch scheduler. Currently is volcano, which supports gang scheduler policy. Please use --batch-scheduler instead.")
 	flag.StringVar(&batchScheduler, "batch-scheduler", "",
 		"Batch scheduler name, supported values are volcano, yunikorn, kai-scheduler.")
+	flag.StringVar(&kubernetesWASTargetVersion, "kubernetes-was-target-version", "",
+		"Pin the scheduling.k8s.io API version for Kubernetes workload-aware scheduling (e.g. v1beta1, v1alpha3). Empty selects the most mature version the cluster serves. Only used with the KubernetesWAS feature gate.")
 	flag.StringVar(&configFile, "config", "", "Path to structured config file. Flags are ignored if config file is set.")
 	flag.BoolVar(&useKubernetesProxy, "use-kubernetes-proxy", false,
 		"Use Kubernetes proxy subresource when connecting to the Ray Head node.")
@@ -135,6 +138,7 @@ func main() {
 		config.LogStdoutEncoder = logStdoutEncoder
 		config.EnableBatchScheduler = enableBatchScheduler
 		config.BatchScheduler = batchScheduler
+		config.KubernetesWASTargetVersion = kubernetesWASTargetVersion
 		config.UseKubernetesProxy = useKubernetesProxy
 		config.DeleteRayJobAfterJobFinishes = os.Getenv(utils.DELETE_RAYJOB_CR_AFTER_JOB_FINISHES) == "true"
 		config.EnableMetrics = enableMetrics

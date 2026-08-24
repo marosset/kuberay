@@ -58,11 +58,15 @@ func RegisterProvider(p Provider) {
 // and builds the batch scheduler for it. New must be called before AddToScheme or
 // ConfigureReconciler, which delegate to the provider chosen by New.
 type SchedulerFactory struct {
+	// TargetVersion optionally pins the scheduling.k8s.io API version to use
+	// (e.g. "v1beta1"); empty selects the most mature served version.
+	TargetVersion string
+
 	provider Provider
 }
 
 func (f *SchedulerFactory) New(_ context.Context, config *rest.Config, cli client.Client) (schedulerinterface.BatchScheduler, error) {
-	provider, err := selectProvider(config)
+	provider, err := selectProvider(config, f.TargetVersion)
 	if err != nil {
 		return nil, err
 	}
