@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/go-logr/logr"
 
@@ -12,12 +13,21 @@ import (
 	"github.com/ray-project/kuberay/ray-operator/pkg/features"
 )
 
+// supportedKubernetesWASTargetVersions is the set of scheduling.k8s.io API versions the WAS
+// scheduler may be pinned to via --kubernetes-was-target-version. It mirrors the Helm chart's
+// validateKubernetesWAS guard. A static list (not the provider registry) avoids coupling config
+// validation to provider registration order.
+var supportedKubernetesWASTargetVersions = []string{"v1alpha2", "v1beta1", "v1alpha3"}
+
 func ValidateBatchSchedulerConfig(logger logr.Logger, config Configuration) error {
 	// The KubernetesWAS feature gate selects the Kubernetes WAS scheduler and is mutually
 	// exclusive with --batch-scheduler and --enable-batch-scheduler.
 	if features.Enabled(features.KubernetesWAS) {
 		if config.EnableBatchScheduler || len(config.BatchScheduler) > 0 {
 			return fmt.Errorf("the KubernetesWAS feature gate cannot be combined with --batch-scheduler or --enable-batch-scheduler")
+		}
+		if v := config.KubernetesWASTargetVersion; len(v) > 0 && !slices.Contains(supportedKubernetesWASTargetVersions, v) {
+			return fmt.Errorf("kubernetes-was-target-version %q is not supported; must be one of %v", v, supportedKubernetesWASTargetVersions)
 		}
 		return nil
 	}

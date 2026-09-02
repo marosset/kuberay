@@ -144,6 +144,10 @@ func TestValidateBatchSchedulerConfigKubernetesWAS(t *testing.T) {
 	require.NoError(t, ValidateBatchSchedulerConfig(testr.New(t), Configuration{}))
 	// A pinned target version is allowed with the KubernetesWAS gate on.
 	require.NoError(t, ValidateBatchSchedulerConfig(testr.New(t), Configuration{KubernetesWASTargetVersion: "v1beta1"}))
+	// An unsupported target version is rejected even with the gate on.
+	err := ValidateBatchSchedulerConfig(testr.New(t), Configuration{KubernetesWASTargetVersion: "v1beta2"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "kubernetes-was-target-version")
 	require.Error(t, ValidateBatchSchedulerConfig(testr.New(t), Configuration{BatchScheduler: volcano.GetPluginName()}))
 	require.Error(t, ValidateBatchSchedulerConfig(testr.New(t), Configuration{EnableBatchScheduler: true}))
 }
