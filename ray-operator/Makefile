@@ -120,24 +120,6 @@ test-e2e-kubernetes-was-v1alpha3: WHAT ?= ./test/e2ekuberneteswas
 test-e2e-kubernetes-was-v1alpha3: manifests fmt vet ## Run e2e Kubernetes WAS v1alpha3 tests (requires K8s 1.37+).
 	go test -timeout 30m -v -run 'TestKubernetesWASV1Alpha3_' $(WHAT)
 
-# Kubernetes 1.37 has no published kindest/node image yet, so build one locally
-# from the kubernetes source at the given tag. Override WAS_K8S_VERSION at GA.
-WAS_K8S_VERSION ?= v1.37.0-rc.0
-WAS_KIND_NODE_IMAGE ?= kindest/node:$(WAS_K8S_VERSION)
-# Clone the Kubernetes source OUTSIDE the ray-operator Go module (repo-root bin/,
-# ignored by **/bin/) so controller-gen's `paths=./...` scan and go build/vet/test
-# never descend into it.
-WAS_K8S_SRC ?= $(CURDIR)/../bin/kubernetes-src
-
-.PHONY: kind-node-image
-kind-node-image: $(LOCALBIN) ## Build a Kind node image for Kubernetes 1.37 ($(WAS_KIND_NODE_IMAGE)); needed until a published kindest/node exists. Override WAS_K8S_VERSION.
-	@command -v kind >/dev/null 2>&1 || { echo "kind is required: https://kind.sigs.k8s.io/"; exit 1; }
-	@if [ ! -d "$(WAS_K8S_SRC)" ]; then \
-		echo ">> cloning kubernetes/kubernetes@$(WAS_K8S_VERSION) (shallow) into $(WAS_K8S_SRC)"; \
-		git clone --depth 1 --branch $(WAS_K8S_VERSION) https://github.com/kubernetes/kubernetes.git "$(WAS_K8S_SRC)"; \
-	fi
-	kind build node-image "$(WAS_K8S_SRC)" --image "$(WAS_KIND_NODE_IMAGE)"
-
 sync: helm api-docs
 	./hack/update-codegen.sh
 
@@ -201,6 +183,10 @@ deploy-with-override: manifests kustomize ## Deploy controller with test-only fe
 deploy-kubernetes-was-v1alpha2: manifests kustomize ## Deploy controller with Kubernetes WAS v1alpha2 batch scheduler enabled (requires K8s 1.36+).
 	cd config/default && $(KUSTOMIZE) edit set image kuberay/operator=${IMG}
 	$(KUSTOMIZE) build config/overlays/kubernetes-was-v1alpha2 | kubectl apply --server-side=true -f -
+
+deploy-kubernetes-was-v1alpha3: manifests kustomize ## Deploy controller with Kubernetes WAS pinned to the v1alpha3 provider (requires K8s 1.37+).
+	cd config/default && $(KUSTOMIZE) edit set image kuberay/operator=${IMG}
+	$(KUSTOMIZE) build config/overlays/kubernetes-was-v1alpha3 | kubectl apply --server-side=true -f -
 
 undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config.
 	$(KUSTOMIZE) build config/default | kubectl delete -f -

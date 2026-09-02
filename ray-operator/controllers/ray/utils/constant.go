@@ -55,6 +55,13 @@ const (
 	RayPriorityClassName     = "ray.io/priority-class-name"
 	RayGangSchedulingEnabled = "ray.io/gang-scheduling-enabled"
 
+	// RayKubernetesWASPreemptionPolicyAnnotationKey requests a scheduling.k8s.io PreemptionPolicy on the
+	// RayCluster's whole-cluster PodGroup. The field exists in both scheduling.k8s.io/v1beta1 and
+	// /v1alpha3, but KubeRay wires it only through the v1alpha3 provider, so this annotation is honored
+	// only when that provider is active and the KubernetesWASPodGroupPreemptionPolicy feature gate is on.
+	// Values: "PreemptLowerPriority" or "Never".
+	RayKubernetesWASPreemptionPolicyAnnotationKey = "ray.io/kubernetes-was-preemption-policy"
+
 	// Ray GCS FT related annotations
 	RayFTEnabledAnnotationKey         = "ray.io/ft-enabled"
 	RayExternalStorageNSAnnotationKey = "ray.io/external-storage-namespace"

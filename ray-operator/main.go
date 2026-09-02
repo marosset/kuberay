@@ -191,6 +191,7 @@ func main() {
 		exitOnError(err, "Unable to set flag gates for known features")
 	}
 	features.LogFeatureGates(setupLog)
+	warnOnKubernetesWASCapabilityGates()
 
 	// validate the batch scheduler configs,
 	// exit with error if the configs is invalid.
@@ -405,6 +406,18 @@ func exitOnError(err error, msg string, keysAndValues ...any) {
 	if err != nil {
 		setupLog.Error(err, msg, keysAndValues...)
 		os.Exit(1)
+	}
+}
+
+// warnOnKubernetesWASCapabilityGates logs a one-time startup warning for each enabled
+// Kubernetes WAS capability gate. KubeRay does not probe whether the backing
+// scheduling.k8s.io field is actually served, so a gate enabled on a cluster that is
+// too old or has the corresponding Kubernetes feature gate disabled will have its field
+// silently pruned by the apiserver (the feature no-ops with no error). This warning
+// makes that misconfiguration visible without a full capability probe.
+func warnOnKubernetesWASCapabilityGates() {
+	if features.Enabled(features.KubernetesWASPodGroupPreemptionPolicy) {
+		setupLog.Info("WARNING: KubernetesWASPodGroupPreemptionPolicy is enabled; the scheduling.k8s.io preemptionPolicy field requires Kubernetes v1.37+ serving scheduling.k8s.io/v1alpha3 AND the cluster-side PodGroupPreemptionPolicy feature gate. If either is missing the apiserver silently prunes the field and the policy has no effect.")
 	}
 }
 

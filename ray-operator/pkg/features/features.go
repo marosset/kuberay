@@ -96,6 +96,21 @@ const (
 	// selects the scheduler; it is mutually exclusive with --batch-scheduler and --enable-batch-scheduler.
 	// Requires a Kubernetes cluster that serves the scheduling.k8s.io API with GenericWorkload enabled.
 	KubernetesWAS featuregate.Feature = "KubernetesWAS"
+
+	// owner: @marosset
+	// rep: N/A
+	// alpha: v1.7
+	//
+	// Enables the gang preemption policy for the Kubernetes WAS scheduler: a RayCluster can request
+	// scheduling.k8s.io PreemptionPolicy on its whole-cluster PodGroup via the
+	// ray.io/kubernetes-was-preemption-policy annotation (values "PreemptLowerPriority" or "Never").
+	// The preemptionPolicy field exists in both scheduling.k8s.io/v1beta1 and /v1alpha3, but KubeRay
+	// currently wires it only through the v1alpha3 provider, so this gate takes effect only when the
+	// operator resolves to v1alpha3 (e.g. --kubernetes-was-target-version=v1alpha3). Requires the
+	// KubernetesWAS gate, Kubernetes v1.37+ serving scheduling.k8s.io/v1alpha3, AND the cluster-side
+	// PodGroupPreemptionPolicy feature gate enabled (the version floor is necessary but not sufficient;
+	// if the cluster gate is off the apiserver silently prunes the field).
+	KubernetesWASPodGroupPreemptionPolicy featuregate.Feature = "KubernetesWASPodGroupPreemptionPolicy"
 )
 
 func init() {
@@ -103,17 +118,18 @@ func init() {
 }
 
 var defaultFeatureGates = map[featuregate.Feature]featuregate.FeatureSpec{
-	RayClusterStatusConditions:       {Default: true, PreRelease: featuregate.Beta},
-	RayJobDeletionPolicy:             {Default: true, PreRelease: featuregate.Beta},
-	RayMultiHostIndexing:             {Default: true, PreRelease: featuregate.Beta},
-	RayServiceIncrementalUpgrade:     {Default: true, PreRelease: featuregate.Beta},
-	RayCronJob:                       {Default: false, PreRelease: featuregate.Alpha},
-	SidecarSubmitterRestart:          {Default: false, PreRelease: featuregate.Alpha},
-	RayClusterNetworkPolicy:          {Default: false, PreRelease: featuregate.Alpha},
-	GCSFaultToleranceEmbeddedStorage: {Default: false, PreRelease: featuregate.Alpha},
-	RayClusterMTLS:                   {Default: false, PreRelease: featuregate.Alpha},
-	RayClusterHistoryServer:          {Default: false, PreRelease: featuregate.Alpha},
-	KubernetesWAS:                    {Default: false, PreRelease: featuregate.Alpha},
+	RayClusterStatusConditions:            {Default: true, PreRelease: featuregate.Beta},
+	RayJobDeletionPolicy:                  {Default: true, PreRelease: featuregate.Beta},
+	RayMultiHostIndexing:                  {Default: true, PreRelease: featuregate.Beta},
+	RayServiceIncrementalUpgrade:          {Default: true, PreRelease: featuregate.Beta},
+	RayCronJob:                            {Default: false, PreRelease: featuregate.Alpha},
+	SidecarSubmitterRestart:               {Default: false, PreRelease: featuregate.Alpha},
+	RayClusterNetworkPolicy:               {Default: false, PreRelease: featuregate.Alpha},
+	GCSFaultToleranceEmbeddedStorage:      {Default: false, PreRelease: featuregate.Alpha},
+	RayClusterMTLS:                        {Default: false, PreRelease: featuregate.Alpha},
+	RayClusterHistoryServer:               {Default: false, PreRelease: featuregate.Alpha},
+	KubernetesWAS:                         {Default: false, PreRelease: featuregate.Alpha},
+	KubernetesWASPodGroupPreemptionPolicy: {Default: false, PreRelease: featuregate.Alpha},
 }
 
 // SetFeatureGateDuringTest is a helper method to override feature gates in tests.

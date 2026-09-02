@@ -1,11 +1,13 @@
+# Local-run variant of ci/kind-config-buildkite-kubernetes-was-1.37.yml.
+# Drops the Buildkite docker-network networking block (apiServerAddress 0.0.0.0,
+# fixed port, certSANs=docker) so kind uses local defaults (127.0.0.1, random
+# port). Kubeadm feature-gates / runtime-config are identical to the CI config.
+#
+# Uses the published kindest/node:v1.37.0 GA image.
+# Create the cluster with:
+#   kind create cluster --name was-1-37 --config ray-operator/hack/kind-config-kubernetes-was-1.37.yml
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
-networking:
-  apiServerAddress: "0.0.0.0"
-  # Ensure stable port so we can rewrite the server address later.
-  apiServerPort: 6443
-# Adding this so containers from the same docker network can access it.
-# https://blog.scottlowe.org/2019/07/30/adding-a-name-to-kubernetes-api-server-certificate/
 nodes:
 - role: control-plane
   image: kindest/node:v1.37.0
@@ -18,17 +20,10 @@ nodes:
         # keeps the alpha preemptionPolicy field from being pruned (exercised by the
         # v1alpha3 preemption e2e).
         feature-gates: "GenericWorkload=true,PodGroupPreemptionPolicy=true"
-        # A production 1.37 cluster serves both scheduling.k8s.io APIs. The WAS
-        # selector auto-picks the most mature served version (v1beta1); pin
-        # v1alpha3 with --kubernetes-was-target-version to exercise the alpha.
         runtime-config: "scheduling.k8s.io/v1beta1=true,scheduling.k8s.io/v1alpha3=true"
-      certSANs:
-        - "docker"
     controllerManager:
       extraArgs:
         feature-gates: "GenericWorkload=true,PodGroupPreemptionPolicy=true"
     scheduler:
       extraArgs:
-        # GenericWorkload enables the scheduler's PodGroup/gang logic. There is no
-        # separate "GangScheduling" gate in 1.37.
         feature-gates: "GenericWorkload=true,PodGroupPreemptionPolicy=true"
