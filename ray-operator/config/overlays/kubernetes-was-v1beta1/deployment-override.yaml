@@ -1,0 +1,17 @@
+# Strategic merge patch for kuberay-operator Deployment.
+# Enables the Kubernetes workload-aware scheduling batch scheduler via the
+# KubernetesWAS feature gate. No target-version pin: the selector auto-picks the
+# most mature served version (v1beta1 on a 1.37 cluster).
+# KubernetesWASPodGroupPreemptionPolicy enables the gang preemption-policy
+# capability (requires the cluster-side PodGroupPreemptionPolicy gate).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kuberay-operator
+spec:
+  template:
+    spec:
+      containers:
+      - name: kuberay-operator
+        args:
+        - --feature-gates=RayClusterStatusConditions=true,RayJobDeletionPolicy=true,RayMultiHostIndexing=true,RayCronJob=true,RayServiceIncrementalUpgrade=true,SidecarSubmitterRestart=true,KubernetesWAS=true,KubernetesWASPodGroupPreemptionPolicy=true

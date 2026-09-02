@@ -24,6 +24,7 @@ import (
 	schedulerinterface "github.com/ray-project/kuberay/ray-operator/controllers/ray/batchscheduler/interface"
 	"github.com/ray-project/kuberay/ray-operator/controllers/ray/batchscheduler/kubernetes-was/shared"
 	"github.com/ray-project/kuberay/ray-operator/controllers/ray/utils"
+	"github.com/ray-project/kuberay/ray-operator/pkg/features"
 )
 
 func newScheduler(cli client.Client) schedulerinterface.BatchScheduler {
@@ -42,6 +43,49 @@ func buildPodGroup(rayCluster *rayv1.RayCluster, minCount int32) *schedulingv1be
 
 func TestName(t *testing.T) {
 	require.Equal(t, "kubernetes-was-v1beta1", newScheduler(nil).Name())
+}
+
+func TestBuildPreemptionPolicyGatedOff(t *testing.T) {
+	rayCluster := newTestRayCluster(newWorkerGroup())
+	rayCluster.Annotations = map[string]string{utils.RayKubernetesWASPreemptionPolicyAnnotationKey: "PreemptLowerPriority"}
+
+	// Gate off: the annotation is ignored and no PreemptionPolicy is set.
+	workload := buildWorkload(rayCluster, 4)
+	assert.Nil(t, workload.Spec.PodGroupTemplates[0].PreemptionPolicy)
+	podGroup := buildPodGroup(rayCluster, 4)
+	assert.Nil(t, podGroup.Spec.PreemptionPolicy)
+}
+
+func TestBuildPreemptionPolicyFromAnnotation(t *testing.T) {
+	features.SetFeatureGateDuringTest(t, features.KubernetesWASPodGroupPreemptionPolicy, true)
+
+	tests := []struct {
+		name       string
+		annotation string
+		want       *schedulingv1beta1.PreemptionPolicy
+	}{
+		{name: "preempt lower priority", annotation: "PreemptLowerPriority", want: ptr(schedulingv1beta1.PreemptLowerPriority)},
+		{name: "never", annotation: "Never", want: ptr(schedulingv1beta1.PreemptNever)},
+		{name: "absent", annotation: "", want: nil},
+		{name: "unrecognized value", annotation: "bogus", want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rayCluster := newTestRayCluster(newWorkerGroup())
+			if tt.annotation != "" {
+				rayCluster.Annotations = map[string]string{utils.RayKubernetesWASPreemptionPolicyAnnotationKey: tt.annotation}
+			}
+
+			workload := buildWorkload(rayCluster, 4)
+			assert.Equal(t, tt.want, workload.Spec.PodGroupTemplates[0].PreemptionPolicy)
+			podGroup := buildPodGroup(rayCluster, 4)
+			assert.Equal(t, tt.want, podGroup.Spec.PreemptionPolicy)
+		})
+	}
+}
+
+func ptr(p schedulingv1beta1.PreemptionPolicy) *schedulingv1beta1.PreemptionPolicy {
+	return &p
 }
 
 func TestDoBatchSchedulingOnSubmissionCreatesWorkloadAndPodGroups(t *testing.T) {
@@ -303,7 +347,7 @@ func TestCleanupOnCompletionNotFoundIsNoop(t *testing.T) {
 	assert.False(t, didCleanup)
 }
 
-func TestSchedulingV1beta1Available(t *testing.T) {
+func TestProviderAvailable(t *testing.T) {
 	tests := []struct {
 		name        string
 		handler     http.HandlerFunc
@@ -355,7 +399,7 @@ func TestSchedulingV1beta1Available(t *testing.T) {
 			server := httptest.NewServer(tt.handler)
 			defer server.Close()
 
-			err := schedulingV1beta1Available(&rest.Config{Host: server.URL})
+			err := (&Provider{}).Available(&rest.Config{Host: server.URL})
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errContains)
@@ -366,12 +410,12 @@ func TestSchedulingV1beta1Available(t *testing.T) {
 	}
 }
 
-func TestSchedulingV1beta1AvailableAllowsNilConfig(t *testing.T) {
-	require.NoError(t, schedulingV1beta1Available(nil))
+func TestProviderAvailableAllowsNilConfig(t *testing.T) {
+	require.NoError(t, (&Provider{}).Available(nil))
 }
 
-func TestSchedulingV1beta1AvailableUnreachableServer(t *testing.T) {
-	err := schedulingV1beta1Available(&rest.Config{Host: "http://127.0.0.1:1"})
+func TestProviderAvailableUnreachableServer(t *testing.T) {
+	err := (&Provider{}).Available(&rest.Config{Host: "http://127.0.0.1:1"})
 	require.Error(t, err)
 	assert.True(t, strings.Contains(err.Error(), "scheduling.k8s.io/v1beta1 API is not available") || strings.Contains(err.Error(), "connection refused"))
 }

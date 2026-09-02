@@ -80,6 +80,44 @@ func TestKubernetesWASV1Beta1_CreatesWorkloadAndPodGroups(t *testing.T) {
 		}, BeTrue()))
 }
 
+// TestKubernetesWASV1Beta1_PreemptionPolicy verifies the gang preemption policy
+// requested via the ray.io/kubernetes-was-preemption-policy annotation is
+// persisted on both the Workload template and the runtime PodGroup. This requires
+// the operator's KubernetesWASPodGroupPreemptionPolicy gate (set by the v1beta1
+// overlay) AND the cluster-side PodGroupPreemptionPolicy gate; without either, the
+// apiserver silently prunes the field.
+func TestKubernetesWASV1Beta1_PreemptionPolicy(t *testing.T) {
+	test := With(t)
+	g := NewWithT(t)
+
+	namespace := test.NewTestNamespace()
+
+	rayClusterAC := newWASRayClusterAC("preempt", namespace.Name).
+		WithAnnotations(map[string]string{utils.RayKubernetesWASPreemptionPolicyAnnotationKey: "PreemptLowerPriority"}).
+		WithSpec(NewRayClusterSpec())
+
+	rayCluster, err := test.Client().Ray().RayV1().RayClusters(namespace.Name).Apply(test.Ctx(), rayClusterAC, TestApplyOptions)
+	g.Expect(err).NotTo(HaveOccurred())
+	LogWithTimestamp(test.T(), "Created RayCluster %s/%s successfully", rayCluster.Namespace, rayCluster.Name)
+
+	LogWithTimestamp(test.T(), "Waiting for RayCluster %s/%s to become ready", rayCluster.Namespace, rayCluster.Name)
+	g.Eventually(RayCluster(test, namespace.Name, rayCluster.Name), TestTimeoutMedium).
+		Should(WithTransform(RayClusterState, Equal(rayv1.Ready)))
+
+	LogWithTimestamp(test.T(), "Verifying preemptionPolicy is persisted on the Workload template")
+	workload, err := GetWorkloadV1Beta1(test, namespace.Name, rayCluster.Name)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(workload.Spec.PodGroupTemplates).To(HaveLen(1))
+	g.Expect(workload.Spec.PodGroupTemplates[0].PreemptionPolicy).NotTo(BeNil())
+	g.Expect(*workload.Spec.PodGroupTemplates[0].PreemptionPolicy).To(Equal(schedulingv1beta1.PreemptLowerPriority))
+
+	LogWithTimestamp(test.T(), "Verifying preemptionPolicy is persisted on the runtime PodGroup")
+	podGroup, err := GetPodGroupV1Beta1(test, namespace.Name, rayCluster.Name+"-cluster")
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(podGroup.Spec.PreemptionPolicy).NotTo(BeNil())
+	g.Expect(*podGroup.Spec.PreemptionPolicy).To(Equal(schedulingv1beta1.PreemptLowerPriority))
+}
+
 func TestKubernetesWASV1Beta1_PodSchedulingGroup(t *testing.T) {
 	test := With(t)
 	g := NewWithT(t)

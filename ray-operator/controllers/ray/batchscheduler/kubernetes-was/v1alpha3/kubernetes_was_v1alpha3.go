@@ -1,19 +1,15 @@
 // Package v1alpha3 implements the Kubernetes workload-aware scheduling provider
-// for scheduling.k8s.io/v1alpha3. The founding-subset reconcile logic lives in
-// the sibling kubernetes-was/shared package; this package supplies the v1alpha3
-// type wiring (APIVersionAdapter) and provider glue, plus the v1alpha3 gang
-// preemption policy behind its feature gate.
+// for scheduling.k8s.io/v1alpha3. This package supplies the v1alpha3 type wiring
+// (APIVersionAdapter) and provider glue, plus the gang preemption policy behind
+// its feature gate.
 package v1alpha3
 
 import (
-	"fmt"
-
 	schedulingv1alpha3 "k8s.io/api/scheduling/v1alpha3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -23,7 +19,6 @@ import (
 	kuberneteswas "github.com/ray-project/kuberay/ray-operator/controllers/ray/batchscheduler/kubernetes-was"
 	"github.com/ray-project/kuberay/ray-operator/controllers/ray/batchscheduler/kubernetes-was/shared"
 	"github.com/ray-project/kuberay/ray-operator/controllers/ray/utils"
-	"github.com/ray-project/kuberay/ray-operator/pkg/features"
 )
 
 // schedulerName is this provider's explicit per-version plugin identity, surfaced
@@ -42,7 +37,7 @@ func (p *Provider) GroupVersion() schema.GroupVersion {
 }
 
 func (p *Provider) Available(config *rest.Config) error {
-	return schedulingV1alpha3Available(config)
+	return shared.APIVersionAvailable(config, schedulingv1alpha3.SchemeGroupVersion)
 }
 
 func (p *Provider) AddToScheme(scheme *runtime.Scheme) {
@@ -56,20 +51,6 @@ func (p *Provider) NewScheduler(cli client.Client) schedulerinterface.BatchSched
 func (p *Provider) ConfigureReconciler(b *builder.Builder) *builder.Builder {
 	return b.Owns(&schedulingv1alpha3.Workload{}).
 		Owns(&schedulingv1alpha3.PodGroup{})
-}
-
-func schedulingV1alpha3Available(config *rest.Config) error {
-	if config == nil {
-		return nil
-	}
-	discoveryClient, err := discovery.NewDiscoveryClientForConfig(config)
-	if err != nil {
-		return fmt.Errorf("failed to create discovery client: %w", err)
-	}
-	if _, err := discoveryClient.ServerResourcesForGroupVersion(schedulingv1alpha3.SchemeGroupVersion.String()); err != nil {
-		return fmt.Errorf("scheduling.k8s.io/v1alpha3 API is not available: %w", err)
-	}
-	return nil
 }
 
 // adapter supplies the v1alpha3 type wiring for shared.Scheduler.
@@ -165,24 +146,12 @@ func gangPolicy(minCount int32) schedulingv1alpha3.PodGroupSchedulingPolicy {
 	}
 }
 
-// resolvePreemptionPolicy maps the RayCluster's preemption-policy annotation to a
-// scheduling.k8s.io PreemptionPolicy. It returns nil (leaving the API default) when
-// the KubernetesWASPodGroupPreemptionPolicy gate is off, the annotation is absent, or
-// its value is not a recognized policy. The field is immutable on the live objects, so
-// it only takes effect at initial create. The preemptionPolicy field also exists in
-// v1beta1, but KubeRay wires it only through this v1alpha3 provider.
+// resolvePreemptionPolicy converts the shared-resolved preemption policy value to the
+// v1alpha3 PreemptionPolicy type, or nil when none applies (see shared.ResolvePreemptionPolicy).
 func resolvePreemptionPolicy(rayCluster *rayv1.RayCluster) *schedulingv1alpha3.PreemptionPolicy {
-	if !features.Enabled(features.KubernetesWASPodGroupPreemptionPolicy) {
-		return nil
-	}
-	switch schedulingv1alpha3.PreemptionPolicy(rayCluster.GetAnnotations()[utils.RayKubernetesWASPreemptionPolicyAnnotationKey]) {
-	case schedulingv1alpha3.PreemptLowerPriority:
-		policy := schedulingv1alpha3.PreemptLowerPriority
+	if value := shared.ResolvePreemptionPolicy(rayCluster); value != "" {
+		policy := schedulingv1alpha3.PreemptionPolicy(value)
 		return &policy
-	case schedulingv1alpha3.PreemptNever:
-		policy := schedulingv1alpha3.PreemptNever
-		return &policy
-	default:
-		return nil
 	}
+	return nil
 }

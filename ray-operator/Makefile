@@ -184,6 +184,10 @@ deploy-kubernetes-was-v1alpha2: manifests kustomize ## Deploy controller with Ku
 	cd config/default && $(KUSTOMIZE) edit set image kuberay/operator=${IMG}
 	$(KUSTOMIZE) build config/overlays/kubernetes-was-v1alpha2 | kubectl apply --server-side=true -f -
 
+deploy-kubernetes-was-v1beta1: manifests kustomize ## Deploy controller with Kubernetes WAS enabled; selector auto-picks v1beta1 (requires K8s 1.37+).
+	cd config/default && $(KUSTOMIZE) edit set image kuberay/operator=${IMG}
+	$(KUSTOMIZE) build config/overlays/kubernetes-was-v1beta1 | kubectl apply --server-side=true -f -
+
 deploy-kubernetes-was-v1alpha3: manifests kustomize ## Deploy controller with Kubernetes WAS pinned to the v1alpha3 provider (requires K8s 1.37+).
 	cd config/default && $(KUSTOMIZE) edit set image kuberay/operator=${IMG}
 	$(KUSTOMIZE) build config/overlays/kubernetes-was-v1alpha3 | kubectl apply --server-side=true -f -

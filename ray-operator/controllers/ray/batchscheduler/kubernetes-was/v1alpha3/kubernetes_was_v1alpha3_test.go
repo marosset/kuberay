@@ -347,7 +347,7 @@ func TestCleanupOnCompletionNotFoundIsNoop(t *testing.T) {
 	assert.False(t, didCleanup)
 }
 
-func TestSchedulingV1alpha3Available(t *testing.T) {
+func TestProviderAvailable(t *testing.T) {
 	tests := []struct {
 		name        string
 		handler     http.HandlerFunc
@@ -399,7 +399,7 @@ func TestSchedulingV1alpha3Available(t *testing.T) {
 			server := httptest.NewServer(tt.handler)
 			defer server.Close()
 
-			err := schedulingV1alpha3Available(&rest.Config{Host: server.URL})
+			err := (&Provider{}).Available(&rest.Config{Host: server.URL})
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errContains)
@@ -410,12 +410,12 @@ func TestSchedulingV1alpha3Available(t *testing.T) {
 	}
 }
 
-func TestSchedulingV1alpha3AvailableAllowsNilConfig(t *testing.T) {
-	require.NoError(t, schedulingV1alpha3Available(nil))
+func TestProviderAvailableAllowsNilConfig(t *testing.T) {
+	require.NoError(t, (&Provider{}).Available(nil))
 }
 
-func TestSchedulingV1alpha3AvailableUnreachableServer(t *testing.T) {
-	err := schedulingV1alpha3Available(&rest.Config{Host: "http://127.0.0.1:1"})
+func TestProviderAvailableUnreachableServer(t *testing.T) {
+	err := (&Provider{}).Available(&rest.Config{Host: "http://127.0.0.1:1"})
 	require.Error(t, err)
 	assert.True(t, strings.Contains(err.Error(), "scheduling.k8s.io/v1alpha3 API is not available") || strings.Contains(err.Error(), "connection refused"))
 }

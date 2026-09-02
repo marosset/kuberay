@@ -104,10 +104,8 @@ const (
 	// Enables the gang preemption policy for the Kubernetes WAS scheduler: a RayCluster can request
 	// scheduling.k8s.io PreemptionPolicy on its whole-cluster PodGroup via the
 	// ray.io/kubernetes-was-preemption-policy annotation (values "PreemptLowerPriority" or "Never").
-	// The preemptionPolicy field exists in both scheduling.k8s.io/v1beta1 and /v1alpha3, but KubeRay
-	// currently wires it only through the v1alpha3 provider, so this gate takes effect only when the
-	// operator resolves to v1alpha3 (e.g. --kubernetes-was-target-version=v1alpha3). Requires the
-	// KubernetesWAS gate, Kubernetes v1.37+ serving scheduling.k8s.io/v1alpha3, AND the cluster-side
+	// KubeRay wires this through both the v1beta1 and v1alpha3 providers. Requires the KubernetesWAS
+	// gate, Kubernetes v1.37+ serving scheduling.k8s.io/v1beta1 or /v1alpha3, AND the cluster-side
 	// PodGroupPreemptionPolicy feature gate enabled (the version floor is necessary but not sufficient;
 	// if the cluster gate is off the apiserver silently prunes the field).
 	KubernetesWASPodGroupPreemptionPolicy featuregate.Feature = "KubernetesWASPodGroupPreemptionPolicy"

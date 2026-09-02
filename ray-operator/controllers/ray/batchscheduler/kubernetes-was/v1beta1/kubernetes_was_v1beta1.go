@@ -1,17 +1,15 @@
 // Package v1beta1 implements the Kubernetes workload-aware scheduling provider
-// for scheduling.k8s.io/v1beta1. The reconcile logic lives in the shared package;
-// this package supplies only the v1beta1 type wiring (APIVersionAdapter) and provider glue.
+// for scheduling.k8s.io/v1beta1. This package supplies the v1beta1 type wiring
+// (APIVersionAdapter) and provider glue, plus the gang preemption policy behind
+// its feature gate.
 package v1beta1
 
 import (
-	"fmt"
-
 	schedulingv1beta1 "k8s.io/api/scheduling/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -39,7 +37,7 @@ func (p *Provider) GroupVersion() schema.GroupVersion {
 }
 
 func (p *Provider) Available(config *rest.Config) error {
-	return schedulingV1beta1Available(config)
+	return shared.APIVersionAvailable(config, schedulingv1beta1.SchemeGroupVersion)
 }
 
 func (p *Provider) AddToScheme(scheme *runtime.Scheme) {
@@ -55,20 +53,6 @@ func (p *Provider) ConfigureReconciler(b *builder.Builder) *builder.Builder {
 		Owns(&schedulingv1beta1.PodGroup{})
 }
 
-func schedulingV1beta1Available(config *rest.Config) error {
-	if config == nil {
-		return nil
-	}
-	discoveryClient, err := discovery.NewDiscoveryClientForConfig(config)
-	if err != nil {
-		return fmt.Errorf("failed to create discovery client: %w", err)
-	}
-	if _, err := discoveryClient.ServerResourcesForGroupVersion(schedulingv1beta1.SchemeGroupVersion.String()); err != nil {
-		return fmt.Errorf("scheduling.k8s.io/v1beta1 API is not available: %w", err)
-	}
-	return nil
-}
-
 // adapter supplies the v1beta1 type wiring for shared.Scheduler.
 type adapter struct{}
 
@@ -78,6 +62,11 @@ func (adapter) NewWorkload() client.Object { return &schedulingv1beta1.Workload{
 func (adapter) NewPodGroup() client.Object { return &schedulingv1beta1.PodGroup{} }
 
 func (adapter) BuildWorkload(rayCluster *rayv1.RayCluster, minCount int32) client.Object {
+	template := schedulingv1beta1.PodGroupTemplate{
+		Name:             shared.ClusterPodGroupTemplateName,
+		SchedulingPolicy: gangPolicy(minCount),
+		PreemptionPolicy: resolvePreemptionPolicy(rayCluster),
+	}
 	return &schedulingv1beta1.Workload{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      rayCluster.Name,
@@ -92,10 +81,7 @@ func (adapter) BuildWorkload(rayCluster *rayv1.RayCluster, minCount int32) clien
 				Kind:     "RayCluster",
 				Name:     rayCluster.Name,
 			},
-			PodGroupTemplates: []schedulingv1beta1.PodGroupTemplate{{
-				Name:             shared.ClusterPodGroupTemplateName,
-				SchedulingPolicy: gangPolicy(minCount),
-			}},
+			PodGroupTemplates: []schedulingv1beta1.PodGroupTemplate{template},
 		},
 	}
 }
@@ -113,6 +99,7 @@ func (adapter) BuildPodGroup(rayCluster *rayv1.RayCluster, minCount int32) clien
 				TemplateName: shared.ClusterPodGroupTemplateName,
 			},
 			SchedulingPolicy: gangPolicy(minCount),
+			PreemptionPolicy: resolvePreemptionPolicy(rayCluster),
 		},
 	}
 }
@@ -157,4 +144,14 @@ func gangPolicy(minCount int32) schedulingv1beta1.PodGroupSchedulingPolicy {
 	return schedulingv1beta1.PodGroupSchedulingPolicy{
 		Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: minCount},
 	}
+}
+
+// resolvePreemptionPolicy converts the shared-resolved preemption policy value to the
+// v1beta1 PreemptionPolicy type, or nil when none applies (see shared.ResolvePreemptionPolicy).
+func resolvePreemptionPolicy(rayCluster *rayv1.RayCluster) *schedulingv1beta1.PreemptionPolicy {
+	if value := shared.ResolvePreemptionPolicy(rayCluster); value != "" {
+		policy := schedulingv1beta1.PreemptionPolicy(value)
+		return &policy
+	}
+	return nil
 }

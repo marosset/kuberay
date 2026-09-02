@@ -18,12 +18,13 @@
     - kubectl config set clusters.kind-kind.server https://docker:6443
 
     # Build the nightly KubeRay operator image and deploy with the Kubernetes WAS batch scheduler.
-    # The deploy overlay only enables the KubernetesWAS feature gate; the operator auto-selects the
-    # most mature served version (v1beta1). The overlay name becomes version-agnostic in step 7.3.
+    # The v1beta1 overlay enables the KubernetesWAS gate (no target-version pin, so the operator
+    # auto-selects the most mature served version, v1beta1) and KubernetesWASPodGroupPreemptionPolicy
+    # for the preemption e2e (the cluster-side PodGroupPreemptionPolicy gate is set in the kind config).
     - pushd ray-operator
     - IMG=kuberay/operator:nightly make docker-image
     - kind load docker-image kuberay/operator:nightly
-    - IMG=kuberay/operator:nightly make deploy-kubernetes-was-v1alpha2
+    - IMG=kuberay/operator:nightly make deploy-kubernetes-was-v1beta1
     - kubectl wait --timeout=90s --for=condition=Available=true deployment kuberay-operator
 
     # Run Kubernetes WAS v1beta1 e2e tests.

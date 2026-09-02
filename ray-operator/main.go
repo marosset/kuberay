@@ -417,7 +417,7 @@ func exitOnError(err error, msg string, keysAndValues ...any) {
 // makes that misconfiguration visible without a full capability probe.
 func warnOnKubernetesWASCapabilityGates() {
 	if features.Enabled(features.KubernetesWASPodGroupPreemptionPolicy) {
-		setupLog.Info("WARNING: KubernetesWASPodGroupPreemptionPolicy is enabled; the scheduling.k8s.io preemptionPolicy field requires Kubernetes v1.37+ serving scheduling.k8s.io/v1alpha3 AND the cluster-side PodGroupPreemptionPolicy feature gate. If either is missing the apiserver silently prunes the field and the policy has no effect.")
+		setupLog.Info("WARNING: KubernetesWASPodGroupPreemptionPolicy is enabled; the scheduling.k8s.io preemptionPolicy field requires Kubernetes v1.37+ serving scheduling.k8s.io/v1beta1 or /v1alpha3 AND the cluster-side PodGroupPreemptionPolicy feature gate. If either is missing the apiserver silently prunes the field and the policy has no effect.")
 	}
 }
 
