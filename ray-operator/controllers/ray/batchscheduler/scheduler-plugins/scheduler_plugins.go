@@ -119,10 +119,6 @@ func (k *KubeScheduler) CleanupOnCompletion(_ context.Context, _ metav1.Object) 
 	return false, nil
 }
 
-func (k *KubeScheduler) SchedulingConditions(_ context.Context, _ *rayv1.RayCluster) ([]metav1.Condition, error) {
-	return nil, nil
-}
-
 func (kf *KubeSchedulerFactory) New(_ context.Context, _ *rest.Config, cli client.Client, _ events.EventRecorder) (schedulerinterface.BatchScheduler, error) {
 	if err := v1alpha1.AddToScheme(cli.Scheme()); err != nil {
 		return nil, err

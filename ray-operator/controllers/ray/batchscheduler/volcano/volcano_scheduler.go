@@ -415,10 +415,6 @@ func (v *VolcanoBatchScheduler) CleanupOnCompletion(ctx context.Context, object 
 	return didUpdate, nil
 }
 
-func (v *VolcanoBatchScheduler) SchedulingConditions(_ context.Context, _ *rayv1.RayCluster) ([]metav1.Condition, error) {
-	return nil, nil
-}
-
 func (vf *VolcanoBatchSchedulerFactory) New(_ context.Context, _ *rest.Config, cli client.Client, _ events.EventRecorder) (schedulerinterface.BatchScheduler, error) {
 	if err := volcanoschedulingv1beta1.AddToScheme(cli.Scheme()); err != nil {
 		return nil, fmt.Errorf("failed to add volcano to scheme with error %w", err)

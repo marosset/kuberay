@@ -9,8 +9,6 @@ import (
 	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	rayv1 "github.com/ray-project/kuberay/ray-operator/apis/ray/v1"
 )
 
 // BatchScheduler manages submitting RayCluster pods to a third-party scheduler.
@@ -32,14 +30,6 @@ type BatchScheduler interface {
 	// This is a no-op for schedulers that don't need cleanup.
 	// Returns (didCleanup, error) where didCleanup indicates whether actual cleanup was performed.
 	CleanupOnCompletion(ctx context.Context, object metav1.Object) (didCleanup bool, err error)
-
-	// SchedulingConditions returns status conditions the batch scheduler wants set on a RayCluster.
-	// The RayCluster controller calls this method on every reconcile when the
-	// RayClusterStatusConditions feature gate is enabled. Implementations must not return
-	// condition types set by the RayCluster controller. Returning nil leaves existing
-	// conditions unchanged.
-	// Schedulers that don't set conditions return (nil, nil).
-	SchedulingConditions(ctx context.Context, rayCluster *rayv1.RayCluster) ([]metav1.Condition, error)
 }
 
 // BatchSchedulerFactory handles initial setup of the scheduler plugin by registering the
@@ -77,10 +67,6 @@ func (d *DefaultBatchScheduler) AddMetadataToChildResource(_ context.Context, _ 
 
 func (d *DefaultBatchScheduler) CleanupOnCompletion(_ context.Context, _ metav1.Object) (bool, error) {
 	return false, nil
-}
-
-func (d *DefaultBatchScheduler) SchedulingConditions(_ context.Context, _ *rayv1.RayCluster) ([]metav1.Condition, error) {
-	return nil, nil
 }
 
 func (df *DefaultBatchSchedulerFactory) New(_ context.Context, _ *rest.Config, _ client.Client, _ events.EventRecorder) (BatchScheduler, error) {

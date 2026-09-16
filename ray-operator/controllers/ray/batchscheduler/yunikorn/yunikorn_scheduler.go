@@ -142,10 +142,6 @@ func (y *YuniKornScheduler) CleanupOnCompletion(_ context.Context, _ metav1.Obje
 	return false, nil
 }
 
-func (y *YuniKornScheduler) SchedulingConditions(_ context.Context, _ *rayv1.RayCluster) ([]metav1.Condition, error) {
-	return nil, nil
-}
-
 func (yf *YuniKornSchedulerFactory) New(_ context.Context, _ *rest.Config, _ client.Client, _ events.EventRecorder) (schedulerinterface.BatchScheduler, error) {
 	return &YuniKornScheduler{}, nil
 }

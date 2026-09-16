@@ -1017,3 +1017,29 @@ func TestKubernetesWAS_MultiHostWorkerGroup(t *testing.T) {
 		}
 	}, TestTimeoutShort).Should(Succeed())
 }
+
+func TestKubernetesWAS_Events(t *testing.T) {
+	test := With(t)
+	g := NewWithT(t)
+
+	namespace := test.NewTestNamespace()
+
+	rayClusterAC := newWASRayClusterAC("events", namespace.Name).
+		WithSpec(NewRayClusterSpec())
+
+	rayCluster, err := test.Client().Ray().RayV1().RayClusters(namespace.Name).Apply(test.Ctx(), rayClusterAC, TestApplyOptions)
+	g.Expect(err).NotTo(HaveOccurred())
+	LogWithTimestamp(test.T(), "Created RayCluster %s/%s successfully", rayCluster.Namespace, rayCluster.Name)
+
+	LogWithTimestamp(test.T(), "Verifying CreatedWorkload and CreatedPodGroup events on the RayCluster")
+	for reason, relatedKind := range map[string]string{"CreatedWorkload": "Workload", "CreatedPodGroup": "PodGroup"} {
+		g.Eventually(GetEvents(test, rayCluster, reason), TestTimeoutShort).
+			Should(ContainElement(SatisfyAll(
+				HaveField("Regarding.Kind", Equal("RayCluster")),
+				HaveField("ReportingController", Equal("batch-scheduler")),
+				HaveField("Type", Equal(corev1.EventTypeNormal)),
+				HaveField("Action", Equal(string(utils.CreateAction))),
+				HaveField("Related.Kind", Equal(relatedKind)),
+			)))
+	}
+}

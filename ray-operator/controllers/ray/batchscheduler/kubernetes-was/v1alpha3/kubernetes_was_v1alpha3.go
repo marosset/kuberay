@@ -87,8 +87,11 @@ func (k *KubernetesWASV1Alpha3Scheduler) CleanupOnCompletion(ctx context.Context
 	return k.deleteSchedulingResources(ctx, rayCluster)
 }
 
-func (k *KubernetesWASV1Alpha3Scheduler) SchedulingConditions(_ context.Context, _ *rayv1.RayCluster) ([]metav1.Condition, error) {
-	return nil, nil
+func (k *KubernetesWASV1Alpha3Scheduler) recordEvent(rayCluster *rayv1.RayCluster, related runtime.Object, eventType string, reason utils.K8sEventType, action utils.K8sEventAction, note string, args ...any) {
+	if k.recorder == nil {
+		return
+	}
+	k.recorder.Eventf(rayCluster, related, eventType, string(reason), string(action), note, args...)
 }
 
 // The methods below adapt this package to kuberneteswas.Provider.
@@ -135,15 +138,23 @@ func (k *KubernetesWASV1Alpha3Scheduler) syncWorkload(ctx context.Context, rayCl
 	}
 	if !found {
 		if err := k.cli.Create(ctx, desired); err != nil {
+			// Usually a stale cache; the next reconcile reports any real name collision.
+			if !errors.IsAlreadyExists(err) {
+				k.recordEvent(rayCluster, desired, corev1.EventTypeWarning, utils.FailedToCreateWorkload, utils.CreateAction,
+					"Failed to create Workload %s/%s: %v", desired.Namespace, desired.Name, err)
+			}
 			return fmt.Errorf("failed to create Workload %s/%s: %w", desired.Namespace, desired.Name, err)
 		}
+		k.recordEvent(rayCluster, desired, corev1.EventTypeNormal, utils.CreatedWorkload, utils.CreateAction,
+			"Created Workload %s/%s", desired.Namespace, desired.Name)
 		return nil
 	}
 	// A same-named Workload we do not own is a name collision; fail loudly rather
 	// than fight its real owner every reconcile.
-	// TODO: also emit a Warning event once the scheduler plugin has an event recorder.
 	if !metav1.IsControlledBy(existing, rayCluster) {
-		return fmt.Errorf("Workload %s/%s already exists and is not owned by this RayCluster; rename it or use a different RayCluster name to avoid the collision", existing.Namespace, existing.Name)
+		err := fmt.Errorf("Workload %s/%s already exists and is not owned by this RayCluster; rename it or use a different RayCluster name to avoid the collision", existing.Namespace, existing.Name)
+		k.recordEvent(rayCluster, existing, corev1.EventTypeWarning, utils.FailedToCreateWorkload, utils.CreateAction, "%v", err)
+		return err
 	}
 	if existing.DeletionTimestamp != nil {
 		return fmt.Errorf("Workload %s/%s is being deleted, will retry", existing.Namespace, existing.Name)
@@ -159,14 +170,14 @@ func (k *KubernetesWASV1Alpha3Scheduler) syncWorkload(ctx context.Context, rayCl
 	if found, err := k.getSchedulingResource(ctx, "PodGroup", podGroupKey, podGroup); err != nil {
 		return err
 	} else if found && metav1.IsControlledBy(podGroup, rayCluster) {
-		if _, err := k.deletePodGroup(ctx, podGroup); err != nil {
+		if _, err := k.deletePodGroup(ctx, rayCluster, podGroup); err != nil {
 			return err
 		}
 		return fmt.Errorf("deleted PodGroup %s/%s before replacing stale Workload, will retry after deletion completes", podGroup.Namespace, podGroup.Name)
 	}
 
 	// PodGroup is gone or not ours; safe to delete the stale Workload.
-	if err := client.IgnoreNotFound(k.deleteWithUIDPrecondition(ctx, existing)); err != nil {
+	if err := client.IgnoreNotFound(k.deleteWorkload(ctx, rayCluster, existing)); err != nil {
 		return fmt.Errorf("failed to delete stale Workload %s/%s: %w", existing.Namespace, existing.Name, err)
 	}
 	return fmt.Errorf("deleted stale Workload %s/%s, will retry after deletion completes", existing.Namespace, existing.Name)
@@ -180,18 +191,26 @@ func (k *KubernetesWASV1Alpha3Scheduler) syncPodGroup(ctx context.Context, rayCl
 	}
 	if !found {
 		if err := k.cli.Create(ctx, desired); err != nil {
+			// Usually a stale cache; the next reconcile reports any real name collision.
+			if !errors.IsAlreadyExists(err) {
+				k.recordEvent(rayCluster, desired, corev1.EventTypeWarning, utils.FailedToCreatePodGroup, utils.CreateAction,
+					"Failed to create PodGroup %s/%s: %v", desired.Namespace, desired.Name, err)
+			}
 			return fmt.Errorf("failed to create PodGroup %s/%s: %w", desired.Namespace, desired.Name, err)
 		}
+		k.recordEvent(rayCluster, desired, corev1.EventTypeNormal, utils.CreatedPodGroup, utils.CreateAction,
+			"Created PodGroup %s/%s", desired.Namespace, desired.Name)
 		return nil
 	}
 	// A same-named PodGroup we do not own is a name collision; fail loudly rather
 	// than fight its real owner every reconcile.
-	// TODO: also emit a Warning event once the scheduler plugin has an event recorder.
 	if !metav1.IsControlledBy(existing, rayCluster) {
-		return fmt.Errorf("PodGroup %s/%s already exists and is not owned by this RayCluster; rename it or use a different RayCluster name to avoid the collision", existing.Namespace, existing.Name)
+		err := fmt.Errorf("PodGroup %s/%s already exists and is not owned by this RayCluster; rename it or use a different RayCluster name to avoid the collision", existing.Namespace, existing.Name)
+		k.recordEvent(rayCluster, existing, corev1.EventTypeWarning, utils.FailedToCreatePodGroup, utils.CreateAction, "%v", err)
+		return err
 	}
 	if existing.DeletionTimestamp != nil {
-		if _, err := k.deletePodGroup(ctx, existing); err != nil {
+		if _, err := k.deletePodGroup(ctx, rayCluster, existing); err != nil {
 			return err
 		}
 		return fmt.Errorf("PodGroup %s/%s is being deleted, will retry", existing.Namespace, existing.Name)
@@ -203,13 +222,26 @@ func (k *KubernetesWASV1Alpha3Scheduler) syncPodGroup(ctx context.Context, rayCl
 	}
 
 	// Remove the protection finalizer before deleting the stale PodGroup.
-	if _, err := k.deletePodGroup(ctx, existing); err != nil {
+	if _, err := k.deletePodGroup(ctx, rayCluster, existing); err != nil {
 		return err
 	}
 	return fmt.Errorf("deleted stale PodGroup %s/%s, will retry after deletion completes", existing.Namespace, existing.Name)
 }
 
-func (k *KubernetesWASV1Alpha3Scheduler) deletePodGroup(ctx context.Context, podGroup *schedulingv1alpha3.PodGroup) (bool, error) {
+func (k *KubernetesWASV1Alpha3Scheduler) deleteWorkload(ctx context.Context, rayCluster *rayv1.RayCluster, workload *schedulingv1alpha3.Workload) error {
+	if err := k.deleteWithUIDPrecondition(ctx, workload); err != nil {
+		if !errors.IsNotFound(err) {
+			k.recordEvent(rayCluster, workload, corev1.EventTypeWarning, utils.FailedToDeleteWorkload, utils.DeleteAction,
+				"Failed to delete Workload %s/%s: %v", workload.Namespace, workload.Name, err)
+		}
+		return err
+	}
+	k.recordEvent(rayCluster, workload, corev1.EventTypeNormal, utils.DeletedWorkload, utils.DeleteAction,
+		"Deleted Workload %s/%s", workload.Namespace, workload.Name)
+	return nil
+}
+
+func (k *KubernetesWASV1Alpha3Scheduler) deletePodGroup(ctx context.Context, rayCluster *rayv1.RayCluster, podGroup *schedulingv1alpha3.PodGroup) (bool, error) {
 	// Kubernetes uses this finalizer to protect a PodGroup while Pods still
 	// reference it. KubeRay removes it before explicitly deleting an owned
 	// PodGroup because replacement or cleanup may occur before those Pods
@@ -230,8 +262,12 @@ func (k *KubernetesWASV1Alpha3Scheduler) deletePodGroup(ctx context.Context, pod
 		if errors.IsNotFound(err) {
 			return didDelete, nil
 		}
+		k.recordEvent(rayCluster, podGroup, corev1.EventTypeWarning, utils.FailedToDeletePodGroup, utils.DeleteAction,
+			"Failed to delete PodGroup %s/%s: %v", podGroup.Namespace, podGroup.Name, err)
 		return didDelete, fmt.Errorf("failed to delete PodGroup %s/%s: %w", podGroup.Namespace, podGroup.Name, err)
 	}
+	k.recordEvent(rayCluster, podGroup, corev1.EventTypeNormal, utils.DeletedPodGroup, utils.DeleteAction,
+		"Deleted PodGroup %s/%s", podGroup.Namespace, podGroup.Name)
 	return true, nil
 }
 
@@ -313,7 +349,7 @@ func (k *KubernetesWASV1Alpha3Scheduler) deleteSchedulingResources(ctx context.C
 	didDelete := false
 	if podGroupExists {
 		var err error
-		didDelete, err = k.deletePodGroup(ctx, podGroup)
+		didDelete, err = k.deletePodGroup(ctx, rayCluster, podGroup)
 		if err != nil {
 			return didDelete, err
 		}
@@ -326,7 +362,7 @@ func (k *KubernetesWASV1Alpha3Scheduler) deleteSchedulingResources(ctx context.C
 	if workload.DeletionTimestamp != nil {
 		return didDelete, fmt.Errorf("Workload %s/%s is being deleted, will retry", workload.Namespace, workload.Name)
 	}
-	if err := k.deleteWithUIDPrecondition(ctx, workload); err != nil {
+	if err := k.deleteWorkload(ctx, rayCluster, workload); err != nil {
 		if !errors.IsNotFound(err) {
 			return didDelete, fmt.Errorf("failed to delete Workload %s/%s: %w", workload.Namespace, workload.Name, err)
 		}

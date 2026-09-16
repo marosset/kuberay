@@ -1,6 +1,7 @@
 package kuberneteswas
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -18,6 +19,7 @@ import (
 type fakeProvider struct {
 	gv        schema.GroupVersion
 	available error
+	recorder  events.EventRecorder
 }
 
 var (
@@ -32,7 +34,8 @@ func (f *fakeProvider) GroupVersion() schema.GroupVersion                       
 func (f *fakeProvider) Available(*rest.Config) error                            { return f.available }
 func (f *fakeProvider) AddToScheme(*runtime.Scheme)                             {}
 func (f *fakeProvider) ConfigureReconciler(b *builder.Builder) *builder.Builder { return b }
-func (f *fakeProvider) NewScheduler(client.Client, events.EventRecorder) schedulerinterface.BatchScheduler {
+func (f *fakeProvider) NewScheduler(_ client.Client, recorder events.EventRecorder) schedulerinterface.BatchScheduler {
+	f.recorder = recorder
 	return nil
 }
 
@@ -49,6 +52,18 @@ func setProviderUnavailable(t *testing.T, provider *fakeProvider) {
 	original := provider.available
 	provider.available = errNotServed
 	t.Cleanup(func() { provider.available = original })
+}
+
+func TestSchedulerFactoryForwardsEventRecorder(t *testing.T) {
+	provider := &fakeProvider{gv: v1alpha3Provider.gv}
+	withProviders(t, provider)
+	recorder := events.NewFakeRecorder(10)
+	factory := &SchedulerFactory{}
+
+	_, err := factory.New(context.Background(), nil, nil, recorder)
+
+	require.NoError(t, err)
+	require.Same(t, recorder, provider.recorder)
 }
 
 func TestSelectProviderNoneRegistered(t *testing.T) {

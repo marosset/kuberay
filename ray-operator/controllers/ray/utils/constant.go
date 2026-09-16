@@ -488,6 +488,16 @@ const (
 	BatchSchedulerCleanedUp       K8sEventType = "BatchSchedulerCleanedUp"
 	FailedToCleanupBatchScheduler K8sEventType = "FailedToCleanupBatchScheduler"
 
+	// Kubernetes workload-aware scheduling (Workload/PodGroup) event list
+	CreatedWorkload        K8sEventType = "CreatedWorkload"
+	FailedToCreateWorkload K8sEventType = "FailedToCreateWorkload"
+	DeletedWorkload        K8sEventType = "DeletedWorkload"
+	FailedToDeleteWorkload K8sEventType = "FailedToDeleteWorkload"
+	CreatedPodGroup        K8sEventType = "CreatedPodGroup"
+	FailedToCreatePodGroup K8sEventType = "FailedToCreatePodGroup"
+	DeletedPodGroup        K8sEventType = "DeletedPodGroup"
+	FailedToDeletePodGroup K8sEventType = "FailedToDeletePodGroup"
+
 	// RayCronJob event list
 	InvalidRayCronJobSpec K8sEventType = "InvalidRayCronJobSpec"
 	SuspendedRayCronJob   K8sEventType = "SuspendedRayCronJob"

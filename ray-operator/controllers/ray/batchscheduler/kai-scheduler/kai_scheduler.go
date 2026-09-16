@@ -76,10 +76,6 @@ func (k *KaiScheduler) CleanupOnCompletion(_ context.Context, _ metav1.Object) (
 	return false, nil
 }
 
-func (k *KaiScheduler) SchedulingConditions(_ context.Context, _ *rayv1.RayCluster) ([]metav1.Condition, error) {
-	return nil, nil
-}
-
 func (kf *KaiSchedulerFactory) New(_ context.Context, _ *rest.Config, _ client.Client, _ events.EventRecorder) (schedulerinterface.BatchScheduler, error) {
 	return &KaiScheduler{}, nil
 }

@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	clientFake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -43,6 +44,109 @@ func TestAddMetadataToChildResourceSetsDefaultSchedulerName(t *testing.T) {
 func TestName(t *testing.T) {
 	scheduler := &KubernetesWASV1Alpha3Scheduler{}
 	require.Equal(t, "kubernetes-was-v1alpha3", scheduler.Name())
+}
+
+func TestDoBatchSchedulingOnSubmissionRecordsCreationFailures(t *testing.T) {
+	createErr := fmt.Errorf("create denied")
+	tests := []struct {
+		name           string
+		failedName     string
+		createErr      error
+		expectedEvents []string
+	}{
+		{
+			name:           "Workload creation fails",
+			failedName:     "test-cluster",
+			createErr:      createErr,
+			expectedEvents: []string{"Warning FailedToCreateWorkload"},
+		},
+		{
+			name:           "PodGroup creation fails",
+			failedName:     "test-cluster-cluster",
+			createErr:      createErr,
+			expectedEvents: []string{"Normal CreatedWorkload", "Warning FailedToCreatePodGroup"},
+		},
+		{
+			name:       "stale cache AlreadyExists is silent",
+			failedName: "test-cluster",
+			createErr:  apierrors.NewAlreadyExists(schedulingv1alpha3.Resource("workloads"), "test-cluster"),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fakeClient := clientFake.NewClientBuilder().WithScheme(newTestScheme(t)).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Create: func(ctx context.Context, cli client.WithWatch, object client.Object, options ...client.CreateOption) error {
+						if object.GetName() == test.failedName {
+							return test.createErr
+						}
+						return cli.Create(ctx, object, options...)
+					},
+				}).Build()
+			recorder := events.NewFakeRecorder(10)
+			scheduler := &KubernetesWASV1Alpha3Scheduler{cli: fakeClient, recorder: recorder}
+
+			err := scheduler.DoBatchSchedulingOnSubmission(context.Background(), newTestRayCluster(newWorkerGroup()))
+
+			require.ErrorIs(t, err, test.createErr)
+			assertRecordedEvents(t, recorder, test.expectedEvents...)
+		})
+	}
+}
+
+func TestCleanupOnCompletionRecordsDeletionEvents(t *testing.T) {
+	deleteErr := fmt.Errorf("delete denied")
+	tests := []struct {
+		name           string
+		deleteErr      error
+		expectedEvents []string
+		podGroup       bool
+	}{
+		{name: "Workload deleted", expectedEvents: []string{"Normal DeletedWorkload"}},
+		{name: "PodGroup deleted", podGroup: true, expectedEvents: []string{"Normal DeletedPodGroup"}},
+		{name: "Workload deletion fails", deleteErr: deleteErr, expectedEvents: []string{"Warning FailedToDeleteWorkload"}},
+		{name: "PodGroup deletion fails", podGroup: true, deleteErr: deleteErr, expectedEvents: []string{"Warning FailedToDeletePodGroup"}},
+		{name: "Workload already deleted", deleteErr: apierrors.NewNotFound(schedulingv1alpha3.Resource("workloads"), "test-cluster")},
+		{name: "PodGroup already deleted", podGroup: true, deleteErr: apierrors.NewNotFound(schedulingv1alpha3.Resource("podgroups"), "test-cluster-cluster")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			rayCluster := newTestRayCluster(newWorkerGroup())
+			var object client.Object = &schedulingv1alpha3.Workload{ObjectMeta: metav1.ObjectMeta{
+				Name: rayCluster.Name, Namespace: rayCluster.Namespace,
+			}}
+			if test.podGroup {
+				object = &schedulingv1alpha3.PodGroup{ObjectMeta: metav1.ObjectMeta{
+					Name: clusterPodGroupName(rayCluster.Name), Namespace: rayCluster.Namespace,
+					Finalizers: []string{podGroupProtectionFinalizer},
+				}}
+			}
+			setRayClusterControllerReference(rayCluster, object)
+			fakeClient := clientFake.NewClientBuilder().WithScheme(newTestScheme(t)).WithObjects(object).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Delete: func(ctx context.Context, cli client.WithWatch, object client.Object, options ...client.DeleteOption) error {
+						if test.deleteErr != nil {
+							return test.deleteErr
+						}
+						return cli.Delete(ctx, object, options...)
+					},
+				}).Build()
+			recorder := events.NewFakeRecorder(10)
+			scheduler := &KubernetesWASV1Alpha3Scheduler{cli: fakeClient, recorder: recorder}
+
+			_, err := scheduler.CleanupOnCompletion(context.Background(), rayCluster)
+
+			switch {
+			case test.deleteErr != nil && !apierrors.IsNotFound(test.deleteErr):
+				require.ErrorIs(t, err, deleteErr)
+			case test.podGroup:
+				require.ErrorContains(t, err, "waiting for PodGroup")
+			default:
+				require.NoError(t, err)
+			}
+			assertRecordedEvents(t, recorder, test.expectedEvents...)
+		})
+	}
 }
 
 func TestDoBatchSchedulingOnSubmissionCreatesWorkloadAndPodGroups(t *testing.T) {
@@ -355,11 +459,13 @@ func TestSyncSchedulingResourcesRejectsForeignSameNameWorkload(t *testing.T) {
 	}
 	setRayClusterControllerReference(foreignRayCluster, foreignWorkload)
 	fakeClient := clientFake.NewClientBuilder().WithScheme(scheme).WithObjects(foreignWorkload).Build()
-	scheduler := &KubernetesWASV1Alpha3Scheduler{cli: fakeClient}
+	recorder := events.NewFakeRecorder(10)
+	scheduler := &KubernetesWASV1Alpha3Scheduler{cli: fakeClient, recorder: recorder}
 
 	err := scheduler.DoBatchSchedulingOnSubmission(ctx, rayCluster)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Workload default/test-cluster already exists and is not owned by this RayCluster")
+	assertRecordedEvents(t, recorder, "Warning FailedToCreateWorkload")
 
 	// We do not adopt a same-named foreign Workload, and synchronization must not
 	// proceed to create the PodGroup.
@@ -393,11 +499,13 @@ func TestSyncSchedulingResourcesRejectsForeignSameNamePodGroup(t *testing.T) {
 	setRayClusterControllerReference(rayCluster, existingWorkload)
 	setRayClusterControllerReference(foreignRayCluster, foreignPodGroup)
 	fakeClient := clientFake.NewClientBuilder().WithScheme(scheme).WithObjects(existingWorkload, foreignPodGroup).Build()
-	scheduler := &KubernetesWASV1Alpha3Scheduler{cli: fakeClient}
+	recorder := events.NewFakeRecorder(10)
+	scheduler := &KubernetesWASV1Alpha3Scheduler{cli: fakeClient, recorder: recorder}
 
 	err := scheduler.DoBatchSchedulingOnSubmission(ctx, rayCluster)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "PodGroup default/test-cluster-cluster already exists and is not owned by this RayCluster")
+	assertRecordedEvents(t, recorder, "Warning FailedToCreatePodGroup")
 	require.NoError(t, fakeClient.Get(ctx, types.NamespacedName{Name: foreignPodGroup.Name, Namespace: foreignPodGroup.Namespace}, &schedulingv1alpha3.PodGroup{}))
 }
 
@@ -471,11 +579,13 @@ func TestSyncSchedulingResourcesReplacesStaleResourcesAcrossReconciles(t *testin
 	}}
 	setRayClusterControllerReference(rayCluster, existingWorkload, existingPodGroup)
 	fakeClient := clientFake.NewClientBuilder().WithScheme(scheme).WithObjects(existingWorkload, existingPodGroup).Build()
-	scheduler := &KubernetesWASV1Alpha3Scheduler{cli: fakeClient}
+	recorder := events.NewFakeRecorder(10)
+	scheduler := &KubernetesWASV1Alpha3Scheduler{cli: fakeClient, recorder: recorder}
 
 	err := scheduler.DoBatchSchedulingOnSubmission(ctx, rayCluster)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "deleted PodGroup default/test-cluster-cluster before replacing stale Workload")
+	assertRecordedEvents(t, recorder, "Normal DeletedPodGroup Deleted PodGroup default/test-cluster-cluster")
 	// Replacement teardown is dependency ordered: the Workload remains until its
 	// runtime PodGroup has been removed.
 	require.NoError(t, fakeClient.Get(ctx, types.NamespacedName{Name: rayCluster.Name, Namespace: rayCluster.Namespace}, &schedulingv1alpha3.Workload{}))
@@ -483,8 +593,12 @@ func TestSyncSchedulingResourcesReplacesStaleResourcesAcrossReconciles(t *testin
 	err = scheduler.DoBatchSchedulingOnSubmission(ctx, rayCluster)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "deleted stale Workload")
+	assertRecordedEvents(t, recorder, "Normal DeletedWorkload Deleted Workload default/test-cluster")
 
 	require.NoError(t, scheduler.DoBatchSchedulingOnSubmission(ctx, rayCluster))
+	assertRecordedEvents(t, recorder,
+		"Normal CreatedWorkload Created Workload default/test-cluster",
+		"Normal CreatedPodGroup Created PodGroup default/test-cluster-cluster")
 
 	workload := &schedulingv1alpha3.Workload{}
 	err = fakeClient.Get(ctx, types.NamespacedName{Name: rayCluster.Name, Namespace: rayCluster.Namespace}, workload)
@@ -526,12 +640,15 @@ func TestSyncSchedulingResourcesRecreatesStalePodGroup(t *testing.T) {
 	}
 	setRayClusterControllerReference(rayCluster, existingWorkload, existingPodGroup)
 	fakeClient := clientFake.NewClientBuilder().WithScheme(scheme).WithObjects(existingWorkload, existingPodGroup).Build()
-	scheduler := &KubernetesWASV1Alpha3Scheduler{cli: fakeClient}
+	recorder := events.NewFakeRecorder(10)
+	scheduler := &KubernetesWASV1Alpha3Scheduler{cli: fakeClient, recorder: recorder}
 
 	err := scheduler.DoBatchSchedulingOnSubmission(ctx, rayCluster)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "deleted stale PodGroup")
+	assertRecordedEvents(t, recorder, "Normal DeletedPodGroup")
 	require.NoError(t, scheduler.DoBatchSchedulingOnSubmission(ctx, rayCluster))
+	assertRecordedEvents(t, recorder, "Normal CreatedPodGroup")
 
 	podGroup := &schedulingv1alpha3.PodGroup{}
 	err = fakeClient.Get(ctx, types.NamespacedName{Name: "test-cluster-cluster", Namespace: rayCluster.Namespace}, podGroup)
@@ -605,10 +722,12 @@ func TestDoBatchSchedulingOnSubmissionIsIdempotentWhenUnchanged(t *testing.T) {
 	ctx := context.Background()
 	scheme := newTestScheme(t)
 	fakeClient := clientFake.NewClientBuilder().WithScheme(scheme).Build()
-	scheduler := &KubernetesWASV1Alpha3Scheduler{cli: fakeClient}
+	recorder := events.NewFakeRecorder(10)
+	scheduler := &KubernetesWASV1Alpha3Scheduler{cli: fakeClient, recorder: recorder}
 	rayCluster := newTestRayCluster(newWorkerGroup())
 
 	require.NoError(t, scheduler.DoBatchSchedulingOnSubmission(ctx, rayCluster))
+	assertRecordedEvents(t, recorder, "Normal CreatedWorkload", "Normal CreatedPodGroup")
 
 	workloadAfterFirst := &schedulingv1alpha3.Workload{}
 	require.NoError(t, fakeClient.Get(ctx, types.NamespacedName{Name: rayCluster.Name, Namespace: rayCluster.Namespace}, workloadAfterFirst))
@@ -619,6 +738,7 @@ func TestDoBatchSchedulingOnSubmissionIsIdempotentWhenUnchanged(t *testing.T) {
 	// Workload is not stale and the existing PodGroup already exists, so neither
 	// resource is deleted or recreated.
 	require.NoError(t, scheduler.DoBatchSchedulingOnSubmission(ctx, rayCluster))
+	assertRecordedEvents(t, recorder)
 
 	workloadAfterSecond := &schedulingv1alpha3.Workload{}
 	require.NoError(t, fakeClient.Get(ctx, types.NamespacedName{Name: rayCluster.Name, Namespace: rayCluster.Namespace}, workloadAfterSecond))
@@ -825,6 +945,14 @@ func TestSchedulingV1alpha3AvailableUnreachableServer(t *testing.T) {
 	err := schedulingV1alpha3Available(&rest.Config{Host: "http://127.0.0.1:1"})
 	require.Error(t, err)
 	assert.True(t, strings.Contains(err.Error(), "scheduling.k8s.io/v1alpha3 API is not available") || strings.Contains(err.Error(), "connection refused"))
+}
+
+func assertRecordedEvents(t *testing.T, recorder *events.FakeRecorder, expected ...string) {
+	t.Helper()
+	require.Len(t, recorder.Events, len(expected))
+	for _, event := range expected {
+		assert.Contains(t, <-recorder.Events, event)
+	}
 }
 
 func newTestScheme(t *testing.T) *runtime.Scheme {

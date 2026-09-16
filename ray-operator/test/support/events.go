@@ -9,6 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	eventsv1 "k8s.io/api/events/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 )
 
 // Based on https://github.com/apache/incubator-kie-kogito-operator/blob/28b2d3dc945e48659b199cca33723568b848f72e/test/pkg/framework/logging.go
@@ -45,6 +46,19 @@ func storeEvents(t Test, namespace *corev1.Namespace) {
 	require.NoError(t.T(), err)
 
 	WriteToOutputDir(t, eventLogFileName, Log, eventContent)
+}
+
+// GetEvents returns events recorded against the object's UID with the given reason.
+func GetEvents(t Test, object metav1.Object, reason string) func() ([]eventsv1.Event, error) {
+	return func() ([]eventsv1.Event, error) {
+		events, err := t.Client().Core().EventsV1().Events(object.GetNamespace()).List(t.Ctx(), metav1.ListOptions{
+			FieldSelector: fields.Set{"regarding.uid": string(object.GetUID()), "reason": reason}.AsSelector().String(),
+		})
+		if err != nil {
+			return nil, err
+		}
+		return events.Items, nil
+	}
 }
 
 func mapEventsToKeys(eventList *eventsv1.EventList) []map[string]string {
