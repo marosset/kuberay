@@ -1,0 +1,23 @@
+# Misconfiguration probe: kube-apiserver has all gates, kube-scheduler has only GenericWorkload.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+  image: kindest/node:v1.37.0
+  kubeadmConfigPatches:
+  - |
+    kind: ClusterConfiguration
+    apiServer:
+      extraArgs:
+        feature-gates: "GenericWorkload=true,TopologyAwareWorkloadScheduling=true,CompositePodGroup=true"
+        runtime-config: "scheduling.k8s.io/v1beta1=true,scheduling.k8s.io/v1alpha3=true"
+    controllerManager:
+      extraArgs:
+        feature-gates: "GenericWorkload=true"
+    scheduler:
+      extraArgs:
+        feature-gates: "GenericWorkload=true"
+- role: worker
+  image: kindest/node:v1.37.0
+- role: worker
+  image: kindest/node:v1.37.0

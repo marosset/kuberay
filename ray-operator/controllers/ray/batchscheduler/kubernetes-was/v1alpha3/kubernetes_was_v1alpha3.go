@@ -39,10 +39,16 @@ const (
 
 type KubernetesWASV1Alpha3Scheduler struct {
 	cli client.Client
+	// compositeServed reports whether the API server serves CompositePodGroups, which the
+	// alpha topology layout requires.
+	compositeServed bool
 }
 
 // Provider implements kuberneteswas.Provider for scheduling.k8s.io/v1alpha3.
-type Provider struct{}
+type Provider struct {
+	// compositeServed is set by Available from API discovery.
+	compositeServed bool
+}
 
 func init() {
 	kuberneteswas.RegisterProvider(&Provider{})
@@ -65,12 +71,22 @@ func (k *KubernetesWASV1Alpha3Scheduler) DoBatchSchedulingOnSubmission(ctx conte
 	return k.syncSchedulingResources(ctx, rayCluster)
 }
 
-func (k *KubernetesWASV1Alpha3Scheduler) AddMetadataToChildResource(_ context.Context, parent metav1.Object, child metav1.Object, _ string) {
+func (k *KubernetesWASV1Alpha3Scheduler) AddMetadataToChildResource(_ context.Context, parent metav1.Object, child metav1.Object, groupName string) {
 	rayCluster, ok := parent.(*rayv1.RayCluster)
 	if !ok || schedulingSkipReason(rayCluster) != "" {
 		return
 	}
 	batchschedulerutils.AddSchedulerNameToObject(child, corev1.DefaultSchedulerName)
+	if leaves, requested, err := topologyLeaves(rayCluster); requested {
+		// With topology, every pod joins the PodGroup of its own group. A request that fails
+		// validation is rejected in DoBatchSchedulingOnSubmission before any pod is created.
+		if err == nil {
+			if name := leafPodGroupName(rayCluster, leaves, groupName); name != "" {
+				setSchedulingGroup(child, name)
+			}
+		}
+		return
+	}
 	// The entire RayCluster (head + every worker group) is gang scheduled as a
 	// single PodGroup, so all pods reference the same PodGroup regardless of group.
 	setSchedulingGroup(child, clusterPodGroupName(rayCluster.Name))
@@ -91,7 +107,12 @@ func (p *Provider) GroupVersion() schema.GroupVersion {
 }
 
 func (p *Provider) Available(config *rest.Config) error {
-	return schedulingV1alpha3Available(config)
+	served, err := schedulingV1alpha3Available(config)
+	if err != nil {
+		return err
+	}
+	p.compositeServed = served
+	return nil
 }
 
 func (p *Provider) AddToScheme(scheme *runtime.Scheme) {
@@ -99,17 +120,29 @@ func (p *Provider) AddToScheme(scheme *runtime.Scheme) {
 }
 
 func (p *Provider) NewScheduler(cli client.Client) schedulerinterface.BatchScheduler {
-	return &KubernetesWASV1Alpha3Scheduler{cli: cli}
+	return &KubernetesWASV1Alpha3Scheduler{cli: cli, compositeServed: p.compositeServed}
 }
 
 func (p *Provider) ConfigureReconciler(b *builder.Builder) *builder.Builder {
-	return b.Owns(&schedulingv1alpha3.Workload{}).
+	b = b.Owns(&schedulingv1alpha3.Workload{}).
 		Owns(&schedulingv1alpha3.PodGroup{})
+	// Only watch CompositePodGroups when they are served; watching an unserved type would
+	// stop the controller from starting for clusters that do not use topology scheduling.
+	if p.compositeServed {
+		b = b.Owns(&schedulingv1alpha3.CompositePodGroup{})
+	}
+	return b
 }
 
 // syncSchedulingResources creates the Workload and PodGroup on the first reconcile and
 // patches gang.minCount in place on later reconciles (v1alpha3 minCount is mutable).
 func (k *KubernetesWASV1Alpha3Scheduler) syncSchedulingResources(ctx context.Context, rayCluster *rayv1.RayCluster) error {
+	if leaves, requested, err := topologyLeaves(rayCluster); requested {
+		if err != nil {
+			return fmt.Errorf("invalid topology request on RayCluster %s/%s: %w", rayCluster.Namespace, rayCluster.Name, err)
+		}
+		return k.syncTopologyResources(ctx, rayCluster, leaves)
+	}
 	workload, podGroup, err := k.buildSchedulingResources(rayCluster)
 	if err != nil {
 		return fmt.Errorf("failed to build scheduling resources for RayCluster %s/%s: %w", rayCluster.Namespace, rayCluster.Name, err)
@@ -141,9 +174,12 @@ func (k *KubernetesWASV1Alpha3Scheduler) syncWorkload(ctx context.Context, rayCl
 	if existing.DeletionTimestamp != nil {
 		return fmt.Errorf("Workload %s/%s is being deleted, will retry", existing.Namespace, existing.Name)
 	}
+	if len(existing.Spec.CompositePodGroupTemplates) > 0 {
+		return fmt.Errorf("Workload %s/%s uses the topology layout but the RayCluster no longer requests topology; recreate the RayCluster", existing.Namespace, existing.Name)
+	}
 	// gang.minCount is mutable in v1alpha3, so a RayCluster resize edits minCount on the
 	// existing Workload in place instead of deleting and recreating it.
-	// A RayCluster currently maps to a single PodGroup, so the Workload has exactly one template.
+	// A RayCluster without a topology request maps to a single PodGroup, so the Workload has exactly one template.
 	existingGang := workloadClusterGang(existing)
 	desiredMinCount := desired.Spec.PodGroupTemplates[0].SchedulingPolicy.Gang.MinCount
 	if !gangNeedsMinCountPatch(existingGang, desiredMinCount) {
@@ -248,8 +284,8 @@ func clusterGangMinCount(rayCluster *rayv1.RayCluster) int32 {
 	return int32(1) + utils.CalculateDesiredReplicas(rayCluster)
 }
 
-func (k *KubernetesWASV1Alpha3Scheduler) buildSchedulingResources(rayCluster *rayv1.RayCluster) (*schedulingv1alpha3.Workload, *schedulingv1alpha3.PodGroup, error) {
-	policy := buildClusterSchedulingPolicy(rayCluster)
+// gangPriority returns the priority settings every group in the gang must share with its pods.
+func gangPriority(rayCluster *rayv1.RayCluster) (string, *schedulingv1alpha3.PreemptionPolicy) {
 	// kube-scheduler requires the PodGroup's priority and preemptionPolicy to match its pods'.
 	priorityClassName := rayCluster.Spec.HeadGroupSpec.Template.Spec.PriorityClassName
 	// Kubernetes defaults an unset PodGroup preemptionPolicy before admission, rejecting Never classes.
@@ -257,6 +293,12 @@ func (k *KubernetesWASV1Alpha3Scheduler) buildSchedulingResources(rayCluster *ra
 	if p := rayCluster.Spec.HeadGroupSpec.Template.Spec.PreemptionPolicy; p != nil {
 		preemptionPolicy = new(schedulingv1alpha3.PreemptionPolicy(*p))
 	}
+	return priorityClassName, preemptionPolicy
+}
+
+func (k *KubernetesWASV1Alpha3Scheduler) buildSchedulingResources(rayCluster *rayv1.RayCluster) (*schedulingv1alpha3.Workload, *schedulingv1alpha3.PodGroup, error) {
+	policy := buildClusterSchedulingPolicy(rayCluster)
+	priorityClassName, preemptionPolicy := gangPriority(rayCluster)
 	workload := &schedulingv1alpha3.Workload{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      rayCluster.Name,
@@ -312,6 +354,15 @@ func (k *KubernetesWASV1Alpha3Scheduler) buildSchedulingResources(rayCluster *ra
 // order). While teardown is in progress it returns a non-nil error so the caller requeues;
 // the bool reports whether anything was actually deleted on this pass.
 func (k *KubernetesWASV1Alpha3Scheduler) deleteSchedulingResources(ctx context.Context, rayCluster *rayv1.RayCluster) (bool, error) {
+	if k.compositeServed {
+		didDelete, pending, err := k.deleteTopologyResources(ctx, rayCluster)
+		if err != nil {
+			return didDelete, err
+		}
+		if pending {
+			return didDelete, fmt.Errorf("waiting for topology scheduling resources of RayCluster %s/%s to finish deleting", rayCluster.Namespace, rayCluster.Name)
+		}
+	}
 	podGroup := &schedulingv1alpha3.PodGroup{}
 	podGroupKey := client.ObjectKey{Name: clusterPodGroupName(rayCluster.Name), Namespace: rayCluster.Namespace}
 	podGroupFound, err := k.getSchedulingResource(ctx, "PodGroup", podGroupKey, podGroup)
@@ -392,16 +443,24 @@ func setSchedulingGroup(obj metav1.Object, podGroupName string) {
 	}
 }
 
-func schedulingV1alpha3Available(config *rest.Config) error {
+// schedulingV1alpha3Available checks that the v1alpha3 API is served and reports whether it
+// includes compositepodgroups, which only exist with the CompositePodGroup feature gate.
+func schedulingV1alpha3Available(config *rest.Config) (compositeServed bool, err error) {
 	if config == nil {
-		return nil
+		return false, nil
 	}
 	discoveryClient, err := discovery.NewDiscoveryClientForConfig(config)
 	if err != nil {
-		return fmt.Errorf("failed to create discovery client: %w", err)
+		return false, fmt.Errorf("failed to create discovery client: %w", err)
 	}
-	if _, err := discoveryClient.ServerResourcesForGroupVersion(schedulingv1alpha3.SchemeGroupVersion.String()); err != nil {
-		return fmt.Errorf("scheduling.k8s.io/v1alpha3 API is not available: %w", err)
+	resources, err := discoveryClient.ServerResourcesForGroupVersion(schedulingv1alpha3.SchemeGroupVersion.String())
+	if err != nil {
+		return false, fmt.Errorf("scheduling.k8s.io/v1alpha3 API is not available: %w", err)
 	}
-	return nil
+	for _, resource := range resources.APIResources {
+		if resource.Name == "compositepodgroups" {
+			return true, nil
+		}
+	}
+	return false, nil
 }

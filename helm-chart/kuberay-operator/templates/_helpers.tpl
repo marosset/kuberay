@@ -424,6 +424,7 @@ rules:
 - apiGroups:
   - scheduling.k8s.io
   resources:
+  - compositepodgroups
   - podgroups
   - workloads
   verbs:

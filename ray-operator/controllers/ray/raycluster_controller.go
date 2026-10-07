@@ -41,6 +41,7 @@ import (
 
 	rayv1 "github.com/ray-project/kuberay/ray-operator/apis/ray/v1"
 	"github.com/ray-project/kuberay/ray-operator/controllers/ray/batchscheduler"
+	kuberneteswas "github.com/ray-project/kuberay/ray-operator/controllers/ray/batchscheduler/kubernetes-was"
 	"github.com/ray-project/kuberay/ray-operator/controllers/ray/common"
 	"github.com/ray-project/kuberay/ray-operator/controllers/ray/expectations"
 	"github.com/ray-project/kuberay/ray-operator/controllers/ray/metrics"
@@ -928,6 +929,31 @@ func (r *RayClusterReconciler) reconcileHeadlessService(ctx context.Context, ins
 	return nil
 }
 
+// validateTopologyActivation fails fast when a RayCluster requests topology-aware scheduling but
+// the Kubernetes WAS plugin cannot honor it. A hard placement request must never silently fall back
+// to ordinary scheduling, and the WAS plugin is not called at all when it is disabled, so this check
+// lives in the controller.
+func (r *RayClusterReconciler) validateTopologyActivation(instance *rayv1.RayCluster) error {
+	if _, requested := instance.Annotations[utils.RayWorkerGroupTopologyAnnotation]; !requested {
+		return nil
+	}
+	pluginEnabled := false
+	if r.options.BatchSchedulerManager != nil {
+		if scheduler, err := r.options.BatchSchedulerManager.GetScheduler(); err == nil {
+			pluginEnabled = scheduler.Name() == kuberneteswas.GetPluginName()
+		}
+	}
+	if !pluginEnabled {
+		return fmt.Errorf("RayCluster %s/%s sets annotation %s but the %s feature gate is not enabled on the operator",
+			instance.Namespace, instance.Name, utils.RayWorkerGroupTopologyAnnotation, features.KubernetesWAS)
+	}
+	if !strings.EqualFold(instance.Labels[utils.RayGangSchedulingEnabled], "true") {
+		return fmt.Errorf("RayCluster %s/%s sets annotation %s but is not opted in to gang scheduling; add label %s=true",
+			instance.Namespace, instance.Name, utils.RayWorkerGroupTopologyAnnotation, utils.RayGangSchedulingEnabled)
+	}
+	return nil
+}
+
 func (r *RayClusterReconciler) reconcilePods(ctx context.Context, instance *rayv1.RayCluster) error {
 	logger := ctrl.LoggerFrom(ctx)
 
@@ -984,6 +1010,9 @@ func (r *RayClusterReconciler) reconcilePods(ctx context.Context, instance *rayv
 	// check if all the pods exist
 	headPods := corev1.PodList{}
 	if err := r.List(ctx, &headPods, common.RayClusterHeadPodsAssociationOptions(instance).ToListOptions()...); err != nil {
+		return err
+	}
+	if err := r.validateTopologyActivation(instance); err != nil {
 		return err
 	}
 	// check if the batch scheduler integration is enabled

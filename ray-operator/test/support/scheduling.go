@@ -41,3 +41,21 @@ func PodGroups(t Test, namespace string) func(g gomega.Gomega) []schedulingv1alp
 		return podGroups.Items
 	}
 }
+
+func CompositePodGroup(t Test, namespace, name string) func() (*schedulingv1alpha3.CompositePodGroup, error) {
+	return func() (*schedulingv1alpha3.CompositePodGroup, error) {
+		return GetCompositePodGroup(t, namespace, name)
+	}
+}
+
+func GetCompositePodGroup(t Test, namespace, name string) (*schedulingv1alpha3.CompositePodGroup, error) {
+	return t.Client().Core().SchedulingV1alpha3().CompositePodGroups(namespace).Get(t.Ctx(), name, metav1.GetOptions{})
+}
+
+func CompositePodGroups(t Test, namespace string) func(g gomega.Gomega) []schedulingv1alpha3.CompositePodGroup {
+	return func(g gomega.Gomega) []schedulingv1alpha3.CompositePodGroup {
+		compositePodGroups, err := t.Client().Core().SchedulingV1alpha3().CompositePodGroups(namespace).List(t.Ctx(), metav1.ListOptions{})
+		g.Expect(err).NotTo(gomega.HaveOccurred())
+		return compositePodGroups.Items
+	}
+}

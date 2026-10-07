@@ -54,6 +54,10 @@ const (
 	// TODO(tgaddair): consider making these part of the CRD
 	RayPriorityClassName     = "ray.io/priority-class-name"
 	RayGangSchedulingEnabled = "ray.io/gang-scheduling-enabled"
+	// RayWorkerGroupTopologyAnnotation (alpha) maps worker group names to node label keys, as a JSON object.
+	// Each named worker group is co-located in one value of its key through Kubernetes topology-aware
+	// workload scheduling. Requires the KubernetesWAS feature gate and RayGangSchedulingEnabled.
+	RayWorkerGroupTopologyAnnotation = "ray.io/worker-group-topology"
 
 	// Ray GCS FT related annotations
 	RayFTEnabledAnnotationKey         = "ray.io/ft-enabled"
